@@ -20,6 +20,7 @@ import isodate
 import pytest
 import pytz
 import requests
+import allure
 from botocore.exceptions import ClientError
 
 from . import (
@@ -69,6 +70,7 @@ from .utils import (
 )
 
 
+@allure.step("Check bucket is empty")
 def _bucket_is_empty(bucket):
     is_empty = True
     for obj in bucket.objects.all():
@@ -87,11 +89,13 @@ def test_bucket_list_empty():
 def test_bucket_list_distinct():
     bucket1 = get_new_bucket_resource()
     bucket2 = get_new_bucket_resource()
-    obj = bucket1.put_object(Body="str", Key="asdf")
+    with allure.step(f"Put object to bucket {bucket1.name}"):
+        obj = bucket1.put_object(Body="str", Key="asdf")
     is_empty = _bucket_is_empty(bucket2)
     assert is_empty == True
 
 
+@allure.step("Create objects")
 def _create_objects(bucket=None, bucket_name=None, keys=[]):
     """
     Populate a (specified or new) bucket with objects with
@@ -101,13 +105,14 @@ def _create_objects(bucket=None, bucket_name=None, keys=[]):
         bucket_name = get_new_bucket_name()
     if bucket is None:
         bucket = get_new_bucket_resource(name=bucket_name)
-
-    for key in keys:
-        obj = bucket.put_object(Body=key, Key=key)
+    with allure.step(f"Put objects {keys} to bucket {bucket}"):
+        for key in keys:
+            obj = bucket.put_object(Body=key, Key=key)
 
     return bucket_name
 
 
+@allure.step("Get keys")
 def _get_keys(response):
     """
     return lists of strings that are the keys from a client.list_objects() response
@@ -119,6 +124,7 @@ def _get_keys(response):
     return keys
 
 
+@allure.step("Get prefixes")
 def _get_prefixes(response):
     """
     return lists of strings that are prefixes from a client.list_objects() response
@@ -172,10 +178,15 @@ def test_basic_key_count():
     client = get_client()
     bucket_names = []
     bucket_name = get_new_bucket_name()
-    client.create_bucket(Bucket=bucket_name)
+    with allure.step(f"Create bucket {bucket_name}"):
+        client.create_bucket(Bucket=bucket_name)
     for j in range(5):
-        client.put_object(Bucket=bucket_name, Key=str(j))
-    response1 = client.list_objects_v2(Bucket=bucket_name)
+        with allure.step(f"Put object with key {str(j)} in bucket {bucket_name}"):
+            client.put_object(Bucket=bucket_name, Key=str(j))
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response1 = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response1}")
     assert response1["KeyCount"] == 5
 
 
@@ -184,8 +195,10 @@ def test_bucket_list_delimiter_basic():
         keys=["foo/bar", "foo/bar/xyzzy", "quux/thud", "asdf"]
     )
     client = get_client()
-
-    response = client.list_objects(Bucket=bucket_name, Delimiter="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Delimiter"] == "/"
     keys = _get_keys(response)
     assert keys == ["asdf"]
@@ -201,8 +214,10 @@ def test_bucket_listv2_delimiter_basic():
         keys=["foo/bar", "foo/bar/xyzzy", "quux/thud", "asdf"]
     )
     client = get_client()
-
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects V2 response:\n{response}")
     assert response["Delimiter"] == "/"
     keys = _get_keys(response)
     assert keys == ["asdf"]
@@ -219,10 +234,10 @@ def test_bucket_listv2_encoding_basic():
         keys=["foo+1/bar", "foo/bar/xyzzy", "quux ab/thud", "asdf+b"]
     )
     client = get_client()
-
-    response = client.list_objects_v2(
-        Bucket=bucket_name, Delimiter="/", EncodingType="url"
-    )
+    req_params = dict(Bucket=bucket_name, Delimiter="/", EncodingType="url")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects V2 response:\n{response}")
     assert response["Delimiter"] == "/"
     keys = _get_keys(response)
     assert keys == ["asdf%2Bb"]
@@ -237,10 +252,10 @@ def test_bucket_list_encoding_basic():
         keys=["foo+1/bar", "foo/bar/xyzzy", "quux ab/thud", "asdf+b"]
     )
     client = get_client()
-
-    response = client.list_objects(
-        Bucket=bucket_name, Delimiter="/", EncodingType="url"
-    )
+    req_params = dict(Bucket=bucket_name, Delimiter="/", EncodingType="url")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Delimiter"] == "/"
     keys = _get_keys(response)
     assert keys == ["asdf%2Bb"]
@@ -250,6 +265,7 @@ def test_bucket_list_encoding_basic():
     assert prefixes == ["foo%2B1/", "foo/", "quux%20ab/"]
 
 
+@allure.step("Validate bucket list")
 def validate_bucket_list(
     bucket_name,
     prefix,
@@ -262,14 +278,16 @@ def validate_bucket_list(
     next_marker,
 ):
     client = get_client()
-
-    response = client.list_objects(
+    req_params = dict(
         Bucket=bucket_name,
         Delimiter=delimiter,
         Marker=marker,
         MaxKeys=max_keys,
         Prefix=prefix,
     )
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["IsTruncated"] == is_truncated
     if "NextMarker" not in response:
         response["NextMarker"] = None
@@ -286,6 +304,7 @@ def validate_bucket_list(
     return response["NextMarker"]
 
 
+@allure.step("Validate bucket list v2")
 def validate_bucket_listv2(
     bucket_name,
     prefix,
@@ -306,7 +325,9 @@ def validate_bucket_listv2(
         params["ContinuationToken"] = continuation_token
     else:
         params["StartAfter"] = ""
-    response = client.list_objects_v2(**params)
+    with allure.step(f"Request list_objects: {params}"):
+        response = client.list_objects_v2(**params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["IsTruncated"] == is_truncated
     if "NextContinuationToken" not in response:
         response["NextContinuationToken"] = None
@@ -449,8 +470,10 @@ def test_bucket_list_delimiter_prefix_ends_with_delimiter():
 def test_bucket_list_delimiter_alt():
     bucket_name = _create_objects(keys=["bar", "baz", "cab", "foo"])
     client = get_client()
-
-    response = client.list_objects(Bucket=bucket_name, Delimiter="a")
+    req_params = dict(Bucket=bucket_name, Delimiter="a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Delimiter"] == "a"
 
     keys = _get_keys(response)
@@ -467,8 +490,10 @@ def test_bucket_list_delimiter_alt():
 def test_bucket_listv2_delimiter_alt():
     bucket_name = _create_objects(keys=["bar", "baz", "cab", "foo"])
     client = get_client()
-
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="a")
+    req_params = dict(Bucket=bucket_name, Delimiter="a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Delimiter"] == "a"
 
     keys = _get_keys(response)
@@ -618,7 +643,10 @@ def test_bucket_list_delimiter_percentage():
     bucket_name = _create_objects(keys=["b%ar", "b%az", "c%ab", "foo"])
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="%")
+    req_params = dict(Bucket=bucket_name, Delimiter="%")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Delimiter"] == "%"
     keys = _get_keys(response)
     # foo contains no 'a' and so is a complete key
@@ -635,7 +663,10 @@ def test_bucket_listv2_delimiter_percentage():
     bucket_name = _create_objects(keys=["b%ar", "b%az", "c%ab", "foo"])
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="%")
+    req_params = dict(Bucket=bucket_name, Delimiter="%")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects V2 response:\n{response}")
     assert response["Delimiter"] == "%"
     keys = _get_keys(response)
     # foo contains no 'a' and so is a complete key
@@ -651,7 +682,10 @@ def test_bucket_list_delimiter_whitespace():
     bucket_name = _create_objects(keys=["b ar", "b az", "c ab", "foo"])
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter=" ")
+    req_params = dict(Bucket=bucket_name, Delimiter=" ")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")    
     assert response["Delimiter"] == " "
     keys = _get_keys(response)
     # foo contains no 'a' and so is a complete key
@@ -668,7 +702,10 @@ def test_bucket_listv2_delimiter_whitespace():
     bucket_name = _create_objects(keys=["b ar", "b az", "c ab", "foo"])
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter=" ")
+    req_params = dict(Bucket=bucket_name, Delimiter=" ")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")    
     assert response["Delimiter"] == " "
     keys = _get_keys(response)
     # foo contains no 'a' and so is a complete key
@@ -684,7 +721,10 @@ def test_bucket_list_delimiter_dot():
     bucket_name = _create_objects(keys=["b.ar", "b.az", "c.ab", "foo"])
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter=".")
+    req_params = dict(Bucket=bucket_name, Delimiter=".")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")    
     assert response["Delimiter"] == "."
     keys = _get_keys(response)
     # foo contains no 'a' and so is a complete key
@@ -701,7 +741,10 @@ def test_bucket_listv2_delimiter_dot():
     bucket_name = _create_objects(keys=["b.ar", "b.az", "c.ab", "foo"])
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter=".")
+    req_params = dict(Bucket=bucket_name, Delimiter=".")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")   
     assert response["Delimiter"] == "."
     keys = _get_keys(response)
     # foo contains no 'a' and so is a complete key
@@ -718,7 +761,10 @@ def test_bucket_list_delimiter_unreadable():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="\x0a")
+    req_params = dict(Bucket=bucket_name, Delimiter="\x0a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Delimiter"] == "\x0a"
 
     keys = _get_keys(response)
@@ -733,7 +779,10 @@ def test_bucket_listv2_delimiter_unreadable():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="\x0a")
+    req_params = dict(Bucket=bucket_name, Delimiter="\x0a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Delimiter"] == "\x0a"
 
     keys = _get_keys(response)
@@ -747,7 +796,10 @@ def test_bucket_list_delimiter_empty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="")
+    req_params = dict(Bucket=bucket_name, Delimiter="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     # putting an empty value into Delimiter will not return a value in the response
     assert not "Delimiter" in response
 
@@ -763,7 +815,10 @@ def test_bucket_listv2_delimiter_empty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="")
+    req_params = dict(Bucket=bucket_name, Delimiter="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     # putting an empty value into Delimiter will not return a value in the response
     assert not "Delimiter" in response
 
@@ -778,7 +833,10 @@ def test_bucket_list_delimiter_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name)
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     # putting an empty value into Delimiter will not return a value in the response
     assert not "Delimiter" in response
 
@@ -794,7 +852,10 @@ def test_bucket_listv2_delimiter_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name)
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     # putting an empty value into Delimiter will not return a value in the response
     assert not "Delimiter" in response
 
@@ -810,7 +871,10 @@ def test_bucket_listv2_fetchowner_notempty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, FetchOwner=True)
+    req_params = dict(Bucket=bucket_name, FetchOwner=True)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     objs_list = response["Contents"]
     assert "Owner" in objs_list[0]
 
@@ -821,7 +885,10 @@ def test_bucket_listv2_fetchowner_defaultempty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name)
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     objs_list = response["Contents"]
     assert not "Owner" in objs_list[0]
 
@@ -831,8 +898,10 @@ def test_bucket_listv2_fetchowner_empty():
     key_names = ["foo/bar", "foo/baz", "quux"]
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
-
-    response = client.list_objects_v2(Bucket=bucket_name, FetchOwner=False)
+    req_params = dict(Bucket=bucket_name, FetchOwner=False)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     objs_list = response["Contents"]
     assert not "Owner" in objs_list[0]
 
@@ -842,7 +911,10 @@ def test_bucket_list_delimiter_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     # putting an empty value into Delimiter will not return a value in the response
     assert response["Delimiter"] == "/"
 
@@ -858,7 +930,10 @@ def test_bucket_listv2_delimiter_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     # putting an empty value into Delimiter will not return a value in the response
     assert response["Delimiter"] == "/"
 
@@ -876,7 +951,10 @@ def test_bucket_list_delimiter_not_skip_special():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Delimiter"] == "/"
 
     keys = _get_keys(response)
@@ -890,7 +968,10 @@ def test_bucket_list_prefix_basic():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Prefix="foo/")
+    req_params = dict(Bucket=bucket_name, Prefix="foo/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == "foo/"
 
     keys = _get_keys(response)
@@ -905,7 +986,10 @@ def test_bucket_listv2_prefix_basic():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Prefix="foo/")
+    req_params = dict(Bucket=bucket_name, Prefix="foo/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == "foo/"
 
     keys = _get_keys(response)
@@ -920,7 +1004,10 @@ def test_bucket_list_prefix_alt():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Prefix="ba")
+    req_params = dict(Bucket=bucket_name, Prefix="ba")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == "ba"
 
     keys = _get_keys(response)
@@ -935,7 +1022,10 @@ def test_bucket_listv2_prefix_alt():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Prefix="ba")
+    req_params = dict(Bucket=bucket_name, Prefix="ba")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == "ba"
 
     keys = _get_keys(response)
@@ -949,7 +1039,10 @@ def test_bucket_list_prefix_empty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Prefix="")
+    req_params = dict(Bucket=bucket_name, Prefix="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == ""
 
     keys = _get_keys(response)
@@ -964,7 +1057,10 @@ def test_bucket_listv2_prefix_empty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Prefix="")
+    req_params = dict(Bucket=bucket_name, Prefix="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == ""
 
     keys = _get_keys(response)
@@ -978,7 +1074,10 @@ def test_bucket_list_prefix_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Prefix="")
+    req_params = dict(Bucket=bucket_name, Prefix="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == ""
 
     keys = _get_keys(response)
@@ -993,7 +1092,10 @@ def test_bucket_listv2_prefix_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Prefix="")
+    req_params = dict(Bucket=bucket_name, Prefix="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == ""
 
     keys = _get_keys(response)
@@ -1007,7 +1109,10 @@ def test_bucket_list_prefix_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Prefix="d")
+    req_params = dict(Bucket=bucket_name, Prefix="d")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == "d"
 
     keys = _get_keys(response)
@@ -1022,7 +1127,10 @@ def test_bucket_listv2_prefix_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Prefix="d")
+    req_params = dict(Bucket=bucket_name, Prefix="d")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == "d"
 
     keys = _get_keys(response)
@@ -1036,7 +1144,10 @@ def test_bucket_list_prefix_unreadable():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Prefix="\x0a")
+    req_params = dict(Bucket=bucket_name, Prefix="\x0a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == "\x0a"
 
     keys = _get_keys(response)
@@ -1051,7 +1162,10 @@ def test_bucket_listv2_prefix_unreadable():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Prefix="\x0a")
+    req_params = dict(Bucket=bucket_name, Prefix="\x0a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == "\x0a"
 
     keys = _get_keys(response)
@@ -1065,7 +1179,10 @@ def test_bucket_list_prefix_delimiter_basic():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="/", Prefix="foo/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/", Prefix="foo/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == "foo/"
     assert response["Delimiter"] == "/"
 
@@ -1081,7 +1198,10 @@ def test_bucket_listv2_prefix_delimiter_basic():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="/", Prefix="foo/")
+    req_params = dict(Bucket=bucket_name, Delimiter="/", Prefix="foo/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == "foo/"
     assert response["Delimiter"] == "/"
 
@@ -1096,7 +1216,10 @@ def test_bucket_list_prefix_delimiter_alt():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="a", Prefix="ba")
+    req_params = dict(Bucket=bucket_name, Delimiter="a", Prefix="ba")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Prefix"] == "ba"
     assert response["Delimiter"] == "a"
 
@@ -1112,7 +1235,10 @@ def test_bucket_listv2_prefix_delimiter_alt():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="a", Prefix="ba")
+    req_params = dict(Bucket=bucket_name, Delimiter="a", Prefix="ba")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["Prefix"] == "ba"
     assert response["Delimiter"] == "a"
 
@@ -1127,7 +1253,10 @@ def test_bucket_list_prefix_delimiter_prefix_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="d", Prefix="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="d", Prefix="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
 
     keys = _get_keys(response)
     prefixes = _get_prefixes(response)
@@ -1141,7 +1270,10 @@ def test_bucket_listv2_prefix_delimiter_prefix_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="d", Prefix="/")
+    req_params = dict(Bucket=bucket_name, Delimiter="d", Prefix="/")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
 
     keys = _get_keys(response)
     prefixes = _get_prefixes(response)
@@ -1154,7 +1286,10 @@ def test_bucket_list_prefix_delimiter_delimiter_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="z", Prefix="b")
+    req_params = dict(Bucket=bucket_name, Delimiter="z", Prefix="b")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
 
     keys = _get_keys(response)
     prefixes = _get_prefixes(response)
@@ -1168,7 +1303,10 @@ def test_bucket_listv2_prefix_delimiter_delimiter_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="z", Prefix="b")
+    req_params = dict(Bucket=bucket_name, Delimiter="z", Prefix="b")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
 
     keys = _get_keys(response)
     prefixes = _get_prefixes(response)
@@ -1181,7 +1319,10 @@ def test_bucket_list_prefix_delimiter_prefix_delimiter_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Delimiter="z", Prefix="y")
+    req_params = dict(Bucket=bucket_name, Delimiter="z", Prefix="y")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
 
     keys = _get_keys(response)
     prefixes = _get_prefixes(response)
@@ -1195,7 +1336,10 @@ def test_bucket_listv2_prefix_delimiter_prefix_delimiter_not_exist():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, Delimiter="z", Prefix="y")
+    req_params = dict(Bucket=bucket_name, Delimiter="z", Prefix="y")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
 
     keys = _get_keys(response)
     prefixes = _get_prefixes(response)
@@ -1209,7 +1353,10 @@ def test_bucket_list_maxkeys_one():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, MaxKeys=1)
+    req_params = dict(Bucket=bucket_name, MaxKeys=1)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["IsTruncated"] == True
 
     keys = _get_keys(response)
@@ -1229,7 +1376,10 @@ def test_bucket_listv2_maxkeys_one():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+    req_params = dict(Bucket=bucket_name, MaxKeys=1)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["IsTruncated"] == True
 
     keys = _get_keys(response)
@@ -1247,7 +1397,10 @@ def test_bucket_list_maxkeys_zero():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, MaxKeys=0)
+    req_params = dict(Bucket=bucket_name, MaxKeys=0)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
 
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
@@ -1260,7 +1413,10 @@ def test_bucket_listv2_maxkeys_zero():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, MaxKeys=0)
+    req_params = dict(Bucket=bucket_name, MaxKeys=0)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
 
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
@@ -1272,7 +1428,10 @@ def test_bucket_list_maxkeys_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name)
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
     assert keys == key_names
@@ -1285,7 +1444,10 @@ def test_bucket_listv2_maxkeys_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name)
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
     assert keys == key_names
@@ -1323,7 +1485,9 @@ def test_account_usage():
 
     client.meta.events.register("before-call.s3.ListBuckets", add_usage)
     client.meta.events.register("after-call.s3.ListBuckets", get_http_response_body)
-    client.list_buckets()
+    with allure.step(f"Request list_buckets:"):
+        response = client.list_buckets()
+        allure.attach(f"List buckets response:\n{response}")
     xml = ET.fromstring(http_response_body.decode("utf-8"))
     parsed = parseXmlToJson(xml)
     summary = parsed["Summary"]
@@ -1515,12 +1679,14 @@ def test_bucket_list_maxkeys_invalid():
 
     # adds invalid max keys to url
     # before list_objects is called
+    @allure.step("Add invalid max keys to url before list_objects is called")
     def add_invalid_maxkeys(**kwargs):
         kwargs["params"]["url"] += "&max-keys=blah"
 
     client.meta.events.register("before-call.s3.ListObjects", add_invalid_maxkeys)
 
     e = assert_raises(ClientError, client.list_objects, Bucket=bucket_name)
+    allure.attach(f"Raise assertion:\n{e}")
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 400
     assert error_code == "InvalidArgument"
@@ -1531,7 +1697,10 @@ def test_bucket_list_marker_none():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name)
+    req_params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Marker"] == ""
 
 
@@ -1540,7 +1709,10 @@ def test_bucket_list_marker_empty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Marker="")
+    req_params = dict(Bucket=bucket_name, Marker="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Marker"] == ""
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
@@ -1554,7 +1726,10 @@ def test_bucket_listv2_continuationtoken_empty():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, ContinuationToken="")
+    req_params = dict(Bucket=bucket_name, ContinuationToken="")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["ContinuationToken"] == ""
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
@@ -1567,12 +1742,18 @@ def test_bucket_listv2_continuationtoken():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response1 = client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+    req_params1 = dict(Bucket=bucket_name, MaxKeys=1)
+    with allure.step(f"Request1 list_objects: {req_params1}"):
+        response1 = client.list_objects_v2(**req_params1)
+        allure.attach(f"List objects v2 response:\n{response1}")
     next_continuation_token = response1["NextContinuationToken"]
 
-    response2 = client.list_objects_v2(
+    req_params2 = dict(
         Bucket=bucket_name, ContinuationToken=next_continuation_token
     )
+    with allure.step(f"Request2 list_objects: {req_params2}"):
+        response2 = client.list_objects_v2(**req_params2)
+        allure.attach(f"List objects v2 response:\n{response2}")
     assert response2["ContinuationToken"] == next_continuation_token
     assert response2["IsTruncated"] == False
     key_names2 = ["baz", "foo", "quxx"]
@@ -1587,12 +1768,18 @@ def test_bucket_listv2_both_continuationtoken_startafter():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response1 = client.list_objects_v2(Bucket=bucket_name, StartAfter="bar", MaxKeys=1)
+    req_params1 = dict(Bucket=bucket_name, StartAfter="bar", MaxKeys=1)
+    with allure.step(f"Request1 list_objects: {req_params1}"):
+        response1 = client.list_objects_v2(**req_params1)
+        allure.attach(f"List objects v2 response:\n{response1}")    
     next_continuation_token = response1["NextContinuationToken"]
-
-    response2 = client.list_objects_v2(
+    
+    req_params2 = dict(
         Bucket=bucket_name, StartAfter="bar", ContinuationToken=next_continuation_token
     )
+    with allure.step(f"Request2 list_objects: {req_params2}"):
+        response2 = client.list_objects_v2(**req_params2)
+        allure.attach(f"List objects v2 response:\n{response2}")
     assert response2["ContinuationToken"] == next_continuation_token
     assert response2["StartAfter"] == "bar"
     assert response2["IsTruncated"] == False
@@ -1606,7 +1793,10 @@ def test_bucket_list_marker_unreadable():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Marker="\x0a")
+    req_params = dict(Bucket=bucket_name, Marker="\x0a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Marker"] == "\x0a"
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
@@ -1619,7 +1809,10 @@ def test_bucket_listv2_startafter_unreadable():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, StartAfter="\x0a")
+    req_params = dict(Bucket=bucket_name, StartAfter="\x0a")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["StartAfter"] == "\x0a"
     assert response["IsTruncated"] == False
     keys = _get_keys(response)
@@ -1631,7 +1824,10 @@ def test_bucket_list_marker_not_in_list():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Marker="blah")
+    req_params = dict(Bucket=bucket_name, Marker="blah")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Marker"] == "blah"
     keys = _get_keys(response)
     assert keys == ["foo", "quxx"]
@@ -1643,7 +1839,10 @@ def test_bucket_listv2_startafter_not_in_list():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, StartAfter="blah")
+    req_params = dict(Bucket=bucket_name, StartAfter="blah")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["StartAfter"] == "blah"
     keys = _get_keys(response)
     assert keys == ["foo", "quxx"]
@@ -1654,7 +1853,10 @@ def test_bucket_list_marker_after_list():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects(Bucket=bucket_name, Marker="zzz")
+    req_params = dict(Bucket=bucket_name, Marker="zzz")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects(**req_params)
+        allure.attach(f"List objects response:\n{response}")
     assert response["Marker"] == "zzz"
     keys = _get_keys(response)
     assert response["IsTruncated"] == False
@@ -1667,13 +1869,17 @@ def test_bucket_listv2_startafter_after_list():
     bucket_name = _create_objects(keys=key_names)
     client = get_client()
 
-    response = client.list_objects_v2(Bucket=bucket_name, StartAfter="zzz")
+    req_params = dict(Bucket=bucket_name, StartAfter="zzz")
+    with allure.step(f"Request list_objects: {req_params}"):
+        response = client.list_objects_v2(**req_params)
+        allure.attach(f"List objects v2 response:\n{response}")
     assert response["StartAfter"] == "zzz"
     keys = _get_keys(response)
     assert response["IsTruncated"] == False
     assert keys == []
 
 
+@allure.step("Compare dates")
 def _compare_dates(datetime1, datetime2):
     """
     changes ms from datetime1 to 0, compares it to datetime2
@@ -1692,21 +1898,29 @@ def test_bucket_list_return_data():
 
     data = {}
     for key_name in key_names:
-        obj_response = client.head_object(Bucket=bucket_name, Key=key_name)
-        acl_response = client.get_object_acl(Bucket=bucket_name, Key=key_name)
-        data.update(
-            {
-                key_name: {
-                    "DisplayName": acl_response["Owner"]["DisplayName"],
-                    "ID": acl_response["Owner"]["ID"],
-                    "ETag": obj_response["ETag"],
-                    "LastModified": obj_response["LastModified"],
-                    "ContentLength": obj_response["ContentLength"],
+        req_params = dict(Bucket=bucket_name, Key=key_name)
+        with allure.step(f"Head object: {req_params}"):
+            obj_response = client.head_object(**req_params)
+        with allure.step(f"Get object acl: {req_params}"):
+            acl_response = client.get_object_acl(**req_params)
+        with allure.step(f"Data update"):
+            allure.attach(f"Initial data: {data}")
+            data.update(
+                {
+                    key_name: {
+                        "DisplayName": acl_response["Owner"]["DisplayName"],
+                        "ID": acl_response["Owner"]["ID"],
+                        "ETag": obj_response["ETag"],
+                        "LastModified": obj_response["LastModified"],
+                        "ContentLength": obj_response["ContentLength"],
+                    }
                 }
-            }
-        )
-
-    response = client.list_objects(Bucket=bucket_name)
+            )
+            allure.attach(f"Updated data: {data}")
+    params=dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {params}"):
+        response = client.list_objects(**params)
+        allure.attach(f"List objects response:\n{response}")
     objs_list = response["Contents"]
     for obj in objs_list:
         key_name = obj["Key"]
@@ -1728,22 +1942,30 @@ def test_bucket_list_return_data_versioning():
     data = {}
 
     for key_name in key_names:
-        obj_response = client.head_object(Bucket=bucket.name, Key=key_name)
-        acl_response = client.get_object_acl(Bucket=bucket.name, Key=key_name)
-        data.update(
-            {
-                key_name: {
-                    "ID": acl_response["Owner"]["ID"],
-                    "DisplayName": acl_response["Owner"]["DisplayName"],
-                    "ETag": obj_response["ETag"],
-                    "LastModified": obj_response["LastModified"],
-                    "ContentLength": obj_response["ContentLength"],
-                    "VersionId": obj_response["VersionId"],
+        req_params = dict(Bucket=bucket.name, Key=key_name)
+        with allure.step(f"Head object: {req_params}"):
+            obj_response = client.head_object(**req_params)
+        with allure.step(f"Get object acl: {req_params}"):
+            acl_response = client.get_object_acl(**req_params)
+        with allure.step(f"Data update"):
+            allure.attach(f"Initial data: {data}")
+            data.update(
+                {
+                    key_name: {
+                        "ID": acl_response["Owner"]["ID"],
+                        "DisplayName": acl_response["Owner"]["DisplayName"],
+                        "ETag": obj_response["ETag"],
+                        "LastModified": obj_response["LastModified"],
+                        "ContentLength": obj_response["ContentLength"],
+                        "VersionId": obj_response["VersionId"],
+                    }
                 }
-            }
-        )
-
-    response = client.list_object_versions(Bucket=bucket.name)
+            )
+            allure.attach(f"Updated data: {data}")
+    params=dict(Bucket=bucket.name)
+    with allure.step(f"Request list_object_versions: {params}"):
+        response = client.list_object_versions(**params)
+        allure.attach(f"List object versions response:\n{response}")
     objs_list = response["Versions"]
 
     for obj in objs_list:
@@ -1760,20 +1982,28 @@ def test_bucket_list_return_data_versioning():
 def test_bucket_list_objects_anonymous():
     bucket_name = get_new_bucket()
     client = get_client()
-    client.put_bucket_acl(Bucket=bucket_name, ACL="public-read")
+    req_params = dict(Bucket=bucket_name, ACL="public-read")
+    with allure.step(f"Put bucket acl: {req_params}"):
+        client.put_bucket_acl(**req_params)
 
     unauthenticated_client = get_unauthenticated_client()
-    unauthenticated_client.list_objects(Bucket=bucket_name)
+    params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects: {params}"):
+        unauthenticated_client.list_objects(**params)
 
 
 @pytest.mark.list_objects_v2
 def test_bucket_listv2_objects_anonymous():
     bucket_name = get_new_bucket()
     client = get_client()
-    client.put_bucket_acl(Bucket=bucket_name, ACL="public-read")
+    req_params = dict(Bucket=bucket_name, ACL="public-read")
+    with allure.step(f"Put bucket acl: {req_params}"):
+        client.put_bucket_acl(**req_params)
 
     unauthenticated_client = get_unauthenticated_client()
-    unauthenticated_client.list_objects_v2(Bucket=bucket_name)
+    params = dict(Bucket=bucket_name)
+    with allure.step(f"Request list_objects_v2: {params}"):
+        unauthenticated_client.list_objects_v2(**params)
 
 
 def test_bucket_list_objects_anonymous_fail():
@@ -1783,6 +2013,7 @@ def test_bucket_list_objects_anonymous_fail():
     e = assert_raises(
         ClientError, unauthenticated_client.list_objects, Bucket=bucket_name
     )
+    allure.attach(f"Raise assertion:\n{e}")
 
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 403
@@ -1797,6 +2028,7 @@ def test_bucket_listv2_objects_anonymous_fail():
     e = assert_raises(
         ClientError, unauthenticated_client.list_objects_v2, Bucket=bucket_name
     )
+    allure.attach(f"Raise assertion:\n{e}")
 
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 403
@@ -1808,7 +2040,7 @@ def test_bucket_notexist():
     client = get_client()
 
     e = assert_raises(ClientError, client.list_objects, Bucket=bucket_name)
-
+    allure.attach(f"Raise assertion:\n{e}") 
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 404
     assert error_code == "NoSuchBucket"
@@ -1820,7 +2052,7 @@ def test_bucketv2_notexist():
     client = get_client()
 
     e = assert_raises(ClientError, client.list_objects_v2, Bucket=bucket_name)
-
+    allure.attach(f"Raise assertion:\n{e}")
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 404
     assert error_code == "NoSuchBucket"
@@ -1831,7 +2063,7 @@ def test_bucket_delete_notexist():
     client = get_client()
 
     e = assert_raises(ClientError, client.delete_bucket, Bucket=bucket_name)
-
+    allure.attach(f"Raise assertion:\n{e}")
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 404
     assert error_code == "NoSuchBucket"
@@ -1843,20 +2075,25 @@ def test_bucket_delete_nonempty():
     client = get_client()
 
     e = assert_raises(ClientError, client.delete_bucket, Bucket=bucket_name)
-
+    allure.attach(f"Raise assertion:\n{e}")
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 409
     assert error_code == "BucketNotEmpty"
 
 
+@allure.step("Do set bucket canned ACL")
 def _do_set_bucket_canned_acl(client, bucket_name, canned_acl, i, results):
     try:
-        client.put_bucket_acl(ACL=canned_acl, Bucket=bucket_name)
+        req_params=dict(ACL=canned_acl, Bucket=bucket_name)
+        with allure.step(f"Put bucket ACL {req_params}"):
+            client.put_bucket_acl(**req_params)
         results[i] = True
     except:
         results[i] = False
+    allure.attach(f"Results:\n{results}")
 
 
+@allure.step("Do set ACL concurrent")
 def _do_set_bucket_canned_acl_concurrent(client, bucket_name, canned_acl, num, results):
     t = []
     for i in range(num):
@@ -1869,6 +2106,7 @@ def _do_set_bucket_canned_acl_concurrent(client, bucket_name, canned_acl, num, r
     return t
 
 
+@allure.step("Do wait completion")
 def _do_wait_completion(t):
     for thr in t:
         thr.join()

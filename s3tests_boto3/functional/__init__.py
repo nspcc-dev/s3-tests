@@ -11,6 +11,7 @@ import boto3
 import munch
 import pytest
 import urllib3
+import allure
 from botocore import UNSIGNED
 from botocore.client import Config
 from botocore.exceptions import ClientError
@@ -393,6 +394,7 @@ def get_cloud_config(cfg):
         config.cloud_regular_storage_class = None
 
 
+@allure.step("Get client")
 def get_client(client_config=None):
     if client_config == None:
         client_config = Config(signature_version="s3v4")
@@ -406,9 +408,11 @@ def get_client(client_config=None):
         verify=config.default_ssl_verify,
         config=client_config,
     )
+    allure.attach(f"Client created with the following options:\n{client._client_config._user_provided_options}")
     return client
 
 
+@allure.step("Get V2 client")
 def get_v2_client():
     client = boto3.client(
         service_name="s3",
@@ -419,6 +423,7 @@ def get_v2_client():
         verify=config.default_ssl_verify,
         config=Config(signature_version="s3"),
     )
+    allure.attach(f"Client V2 created with the following options:\n{client._client_config._user_provided_options}")
     return client
 
 
@@ -562,6 +567,7 @@ def get_alt_iam_client():
     return client
 
 
+@allure.step("Get unauthenticated client")
 def get_unauthenticated_client():
     client = boto3.client(
         service_name="s3",
@@ -572,9 +578,11 @@ def get_unauthenticated_client():
         verify=config.default_ssl_verify,
         config=Config(signature_version=UNSIGNED),
     )
+    allure.attach(f"Client created with the following options:\n{client._client_config._user_provided_options}")
     return client
 
 
+@allure.step("Get bad auth client")
 def get_bad_auth_client(aws_access_key_id="badauth"):
     client = boto3.client(
         service_name="s3",
@@ -585,9 +593,11 @@ def get_bad_auth_client(aws_access_key_id="badauth"):
         verify=config.default_ssl_verify,
         config=Config(signature_version="s3v4"),
     )
+    allure.attach(f"Client created with the following options:\n{client._client_config._user_provided_options}")
     return client
 
 
+@allure.step("Get svc client")
 def get_svc_client(client_config=None, svc="s3"):
     if client_config == None:
         client_config = Config(signature_version="s3v4")
@@ -601,12 +611,14 @@ def get_svc_client(client_config=None, svc="s3"):
         verify=config.default_ssl_verify,
         config=client_config,
     )
+    allure.attach(f"Client created with the following options:\n{client._client_config._user_provided_options}")
     return client
 
 
 bucket_counter = itertools.count(1)
 
 
+@allure.step("Generate a bucket name")
 def get_new_bucket_name():
     """
     Get a bucket name that probably does not exist.
@@ -619,9 +631,11 @@ def get_new_bucket_name():
         prefix=prefix,
         num=next(bucket_counter),
     )
+    allure.attach(f"Buket name: {name}")
     return name
 
 
+@allure.step("Create a new bucket")
 def get_new_bucket_resource(name=None):
     """
     Get a bucket that exists and is empty.
