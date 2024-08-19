@@ -21,7 +21,7 @@ bucket prefix = yournamehere-{random}-
 
 [s3 main]
 # main display_name set in vstart.sh
-display_name = {{ S3_MAIN_DISPLAY_NAME }}
+display_name = {{ S3_ALT_DISPLAY_NAME }}
 
 # main user_idname set in vstart.sh
 user_id = {{ S3_MAIN_USER_ID }} 
@@ -43,7 +43,7 @@ secret_key = {{ S3_MAIN_SECRET_KEY }}
 
 [s3 alt]
 # alt display_name set in vstart.sh
-display_name = john.doe
+display_name = {{ S3_ALT_USER_ID }}
 ## alt email set in vstart.sh
 email = john.doe@example.com
 

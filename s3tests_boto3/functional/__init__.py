@@ -246,7 +246,7 @@ def setup():
     config.main_access_key = cfg.get("s3 main", "access_key")
     config.main_secret_key = cfg.get("s3 main", "secret_key")
     config.main_display_name = cfg.get("s3 main", "display_name")
-    config.main_user_id = cfg.get("s3 main", "user_id")
+    config.main_user_id = config.main_display_name
     config.main_email = cfg.get("s3 main", "email")
     try:
         config.main_kms_keyid = cfg.get("s3 main", "kms_keyid")
@@ -278,13 +278,13 @@ def setup():
     config.alt_access_key = cfg.get("s3 alt", "access_key")
     config.alt_secret_key = cfg.get("s3 alt", "secret_key")
     config.alt_display_name = cfg.get("s3 alt", "display_name")
-    config.alt_user_id = cfg.get("s3 alt", "user_id")
+    config.alt_user_id = config.alt_display_name
     config.alt_email = cfg.get("s3 alt", "email")
 
     config.tenant_access_key = cfg.get("s3 tenant", "access_key")
     config.tenant_secret_key = cfg.get("s3 tenant", "secret_key")
     config.tenant_display_name = cfg.get("s3 tenant", "display_name")
-    config.tenant_user_id = cfg.get("s3 tenant", "user_id")
+    config.tenant_user_id = config.tenant_display_name
     config.tenant_email = cfg.get("s3 tenant", "email")
 
     # vars from the fixtures section
@@ -478,7 +478,7 @@ def get_iam_client(client_config=None):
     config.iam_access_key = cfg.get("iam", "access_key")
     config.iam_secret_key = cfg.get("iam", "secret_key")
     config.iam_display_name = cfg.get("iam", "display_name")
-    config.iam_user_id = cfg.get("iam", "user_id")
+    config.iam_user_id = config.iam_display_name
     config.iam_email = cfg.get("iam", "email")
 
     if client_config == None:
