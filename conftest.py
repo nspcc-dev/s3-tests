@@ -12,7 +12,7 @@ import allure
 import jinja2
 import pexpect
 import pytest
-from helpers.common import ASSETS_DIR
+from helpers.common import get_assets_dir_path
 from helpers.wallet_helpers import create_wallet
 from neofs_testlib.env.env import NeoFSEnv, NodeWallet
 from neofs_testlib.reporter import AllureHandler, get_reporter
@@ -21,6 +21,7 @@ from neofs_testlib.utils.wallet import (
     get_last_public_key_from_wallet,
 )
 
+from pytest_tests.tests.conftest import get_or_create_neofs_env, neofs_env_finalizer
 from s3tests_boto3.functional import setup
 
 get_reporter().register_handler(AllureHandler())
@@ -114,30 +115,21 @@ def remove_dir(dir_path: str) -> None:
 
 @pytest.fixture(scope="session")
 @allure.title("Prepare tmp directory")
-def temp_directory() -> str:
+def temp_directory(request) -> str:
     with allure.step("Prepare tmp directory"):
-        full_path = os.path.join(os.getcwd(), ASSETS_DIR)
+        full_path = get_assets_dir_path()
         create_dir(full_path)
 
     yield full_path
 
-    with allure.step("Remove tmp directory"):
-        remove_dir(full_path)
+    if not request.config.getoption("--persist-env") and not request.config.getoption("--load-env"):
+        with allure.step("Remove tmp directory"):
+            remove_dir(full_path)
 
 
 @pytest.fixture(scope="session", autouse=True)
 def neofs_setup(request, temp_directory):
-    if request.config.getoption("--load-env"):
-        neofs_env = NeoFSEnv.load(request.config.getoption("--load-env"))
-    else:
-        neofs_env = NeoFSEnv.simple()
-        neofs_env.neofs_adm().morph.set_config(
-            rpc_endpoint=f"http://{neofs_env.morph_rpc}",
-            alphabet_wallets=neofs_env.alphabet_wallets_dir,
-            post_data="ContainerFee=0 ContainerAliasFee=0 MaxObjectSize=524288",
-        )
-
-    time.sleep(30)
+    neofs_env = get_or_create_neofs_env(request)
 
     main_wallet = create_wallet()
 
@@ -183,23 +175,7 @@ def neofs_setup(request, temp_directory):
 
     yield neofs_env
 
-    if request.config.getoption("--persist-env"):
-        neofs_env.persist()
-    else:
-        if not request.config.getoption("--load-env"):
-            neofs_env.kill()
-
-    logs_path = os.path.join(os.getcwd(), ASSETS_DIR, "logs")
-    os.makedirs(logs_path, exist_ok=True)
-
-    shutil.copyfile(neofs_env.s3_gw.stderr, f"{logs_path}/s3_gw_log.txt")
-    for idx, ir in enumerate(neofs_env.inner_ring_nodes):
-        shutil.copyfile(ir.stderr, f"{logs_path}/ir_{idx}_log.txt")
-    for idx, sn in enumerate(neofs_env.storage_nodes):
-        shutil.copyfile(sn.stderr, f"{logs_path}/sn_{idx}_log.txt")
-
-    logs_zip_file_path = shutil.make_archive("neofs_logs", "zip", logs_path)
-    allure.attach.file(logs_zip_file_path, name="neofs logs", extension="zip")
+    neofs_env_finalizer(neofs_env, request)
 
 
 @pytest.fixture(scope="session", autouse=True)
