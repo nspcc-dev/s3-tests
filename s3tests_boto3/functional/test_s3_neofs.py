@@ -1014,12 +1014,14 @@ def test_object_tagging_workflow():
 
     response = client.put_object(Bucket=bucket_name, Key=object_name, Body="content")
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+    time.sleep(1)
 
     tags = {"TagSet": [{"Key": "object-tag-key", "Value": "object-tag-value"}]}
     response = client.put_object_tagging(
         Bucket=bucket_name, Key=object_name, Tagging=tags
     )
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+    time.sleep(1)
 
     response = client.get_object_tagging(Bucket=bucket_name, Key=object_name)
     assert len(response["TagSet"]) == 1

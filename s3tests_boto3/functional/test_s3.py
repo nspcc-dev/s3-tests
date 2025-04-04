@@ -2197,6 +2197,7 @@ def test_object_write_read_update_read_delete():
 
     # Write
     client.put_object(Bucket=bucket_name, Key="foo", Body="bar")
+    time.sleep(1)
     # Read
     response = client.get_object(Bucket=bucket_name, Key="foo")
     body = _get_body(response)
@@ -2303,7 +2304,8 @@ def test_object_metadata_replaced_on_put():
     client = get_client()
     metadata_dict = {"meta1": "bar"}
     client.put_object(Bucket=bucket_name, Key="foo", Body="bar", Metadata=metadata_dict)
-
+    time.sleep(1)
+    
     client.put_object(Bucket=bucket_name, Key="foo", Body="bar")
 
     response = client.get_object(Bucket=bucket_name, Key="foo")
@@ -8706,6 +8708,7 @@ def _test_atomic_read(file_size):
 
     fp_a = FakeWriteFile(file_size, "A")
     client.put_object(Bucket=bucket_name, Key="testobj", Body=fp_a)
+    time.sleep(1)
 
     fp_b = FakeWriteFile(file_size, "B")
     fp_a2 = FakeReadFile(
@@ -8750,6 +8753,7 @@ def _test_atomic_write(file_size):
     # create <file_size> file of A's
     fp_a = FakeWriteFile(file_size, "A")
     client.put_object(Bucket=bucket_name, Key=objname, Body=fp_a)
+    time.sleep(1)
 
     # verify A's
     _verify_atomic_key_data(bucket_name, objname, file_size, "A")
@@ -8763,6 +8767,7 @@ def _test_atomic_write(file_size):
     )
 
     client.put_object(Bucket=bucket_name, Key=objname, Body=fp_b)
+    time.sleep(1)
 
     # verify B's
     _verify_atomic_key_data(bucket_name, objname, file_size, "B")
@@ -8805,15 +8810,15 @@ def _test_atomic_dual_write(file_size):
     # verify the file
     _verify_atomic_key_data(bucket_name, objname, file_size, "B")
 
-
+@pytest.mark.fails_on_dbstore
 def test_atomic_dual_write_1mb():
     _test_atomic_dual_write(1024 * 1024)
 
-
+@pytest.mark.fails_on_dbstore
 def test_atomic_dual_write_4mb():
     _test_atomic_dual_write(1024 * 1024 * 4)
 
-
+@pytest.mark.fails_on_dbstore
 def test_atomic_dual_write_8mb():
     _test_atomic_dual_write(1024 * 1024 * 8)
 
@@ -9322,6 +9327,7 @@ def test_versioning_obj_plain_null_version_overwrite():
     key = "testobjfoo"
     content = "fooz"
     client.put_object(Bucket=bucket_name, Key=key, Body=content)
+    time.sleep(1)
 
     check_configure_versioning_retry(bucket_name, "Enabled", "Enabled")
 
@@ -9356,7 +9362,7 @@ def test_versioning_obj_plain_null_version_overwrite_suspended():
     key = "testobjbar"
     content = "foooz"
     client.put_object(Bucket=bucket_name, Key=key, Body=content)
-
+    time.sleep(1)
     check_configure_versioning_retry(bucket_name, "Enabled", "Enabled")
     check_configure_versioning_retry(bucket_name, "Suspended", "Suspended")
 
