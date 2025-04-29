@@ -21,7 +21,7 @@ from neofs_testlib.utils.wallet import (
     get_last_public_key_from_wallet,
 )
 
-from pytest_tests.tests.conftest import get_or_create_neofs_env, neofs_env_finalizer
+from pytest_tests.tests.conftest import get_or_create_neofs_env
 from s3tests_boto3.functional import setup
 
 get_reporter().register_handler(AllureHandler())
@@ -150,8 +150,8 @@ def neofs_setup(request, temp_directory):
     config_template = Path("s3tests.conf.SAMPLE").read_text()
     jinja_template = jinja_env.from_string(config_template)
     rendered_config = jinja_template.render(
-        S3_HOST=neofs_env.s3_gw.address.split(":")[0],
-        S3_PORT=neofs_env.s3_gw.address.split(":")[1],
+        S3_HOST=neofs_env.s3_gw.endpoint.split(":")[0],
+        S3_PORT=neofs_env.s3_gw.endpoint.split(":")[1],
         S3_TLS=True,
         S3_MAIN_DISPLAY_NAME=main_wallet_address,
         S3_MAIN_USER_ID=main_wallet_public_key,
@@ -175,7 +175,7 @@ def neofs_setup(request, temp_directory):
 
     yield neofs_env
 
-    neofs_env_finalizer(neofs_env, request)
+    neofs_env.finalize(request)
 
 
 @pytest.fixture(scope="session", autouse=True)
