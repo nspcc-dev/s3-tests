@@ -15188,6 +15188,30 @@ def test_object_lock_get_legal_hold():
     response = client.get_object_legal_hold(Bucket=bucket_name, Key=key)
     assert response["LegalHold"] == legal_hold_off
 
+def test_object_lock_set_legal_hold_off_not_supported():
+    bucket_name = get_new_bucket_name()
+    client = get_client()
+    client.create_bucket(Bucket=bucket_name, ObjectLockEnabledForBucket=True)
+    
+    key = "file1"
+    client.put_object(Bucket=bucket_name, Body="abc", Key=key)
+    
+    legal_hold = {"Status": "ON"}
+    client.put_object_legal_hold(Bucket=bucket_name, Key=key, LegalHold=legal_hold)
+    response = client.get_object_legal_hold(Bucket=bucket_name, Key=key)
+    assert response["LegalHold"] == legal_hold
+    
+    legal_hold_off = {"Status": "OFF"}
+    e = assert_raises(
+        ClientError,
+        client.put_object_legal_hold,
+        Bucket=bucket_name,
+        Key=key,
+        LegalHold=legal_hold_off,
+    )
+
+    status, error_code = _get_status_and_error_code(e.response)
+    assert status == 501
 
 def test_object_lock_get_legal_hold_invalid_bucket():
     bucket_name = get_new_bucket_name()
