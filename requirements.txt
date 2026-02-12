@@ -24,6 +24,7 @@ colorama==0.4.6
 cryptography==46.0.5
 distlib==0.4.0
 docker==7.0.0
+ecdsa==0.19.1
 Events==0.5
 execnet==2.1.2
 filelock==3.20.3
