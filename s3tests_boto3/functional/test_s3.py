@@ -2330,6 +2330,7 @@ def _get_post_url(bucket_name):
     return "{endpoint}/{bucket_name}".format(endpoint=endpoint, bucket_name=bucket_name)
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_post_object_anonymous_request():
     bucket_name = get_new_bucket_name()
     client = get_client()
@@ -2493,6 +2494,7 @@ def test_post_object_authenticated_request_bad_access_key():
     assert r.status_code == 403
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_post_object_set_success_code():
     bucket_name = get_new_bucket_name()
     client = get_client()
@@ -2513,6 +2515,7 @@ def test_post_object_set_success_code():
     assert r.status_code == 501
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_post_object_set_invalid_success_code():
     bucket_name = get_new_bucket_name()
     client = get_client()
@@ -4192,6 +4195,7 @@ def test_bucket_head_extended():
     assert int(response["ResponseMetadata"]["HTTPHeaders"]["x-rgw-bytes-used"]) == 9
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_raw_get_bucket_acl():
     bucket_name = _setup_bucket_object_acl("private", "public-read")
 
@@ -4200,6 +4204,7 @@ def test_object_raw_get_bucket_acl():
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_raw_get_object_acl():
     bucket_name = _setup_bucket_object_acl("public-read", "private")
 
@@ -4986,6 +4991,7 @@ def test_object_acl_default():
     )
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_acl_canned_during_create():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -5027,6 +5033,7 @@ def test_object_acl_canned_during_create():
     )
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_acl_canned():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -5088,6 +5095,7 @@ def test_object_acl_canned():
     )
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_acl_canned_publicreadwrite():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -5183,6 +5191,7 @@ def test_object_acl_canned_authenticatedread():
     )
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_acl_canned_bucketownerread():
     bucket_name = get_new_bucket_name()
     main_client = get_client()
@@ -5205,6 +5214,7 @@ def test_object_acl_canned_bucketownerread():
         alt_client.put_object(ACL="bucket-owner-read", Bucket=bucket_name, Key="foo")
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_object_acl_canned_bucketownerfullcontrol():
     bucket_name = get_new_bucket_name()
     main_client = get_client()
@@ -9728,6 +9738,7 @@ def test_versioning_multi_object_delete_with_marker_create():
     assert key == delete_markers[0]["Key"]
 
 
+@pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_versioned_object_acl():
     bucket_name = get_new_bucket()
     client = get_client()
