@@ -15143,7 +15143,7 @@ def test_object_lock_put_legal_hold():
     )
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
 
-
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1358")
 def test_object_lock_put_legal_hold_invalid_bucket():
     bucket_name = get_new_bucket_name()
     client = get_client()
