@@ -2330,6 +2330,74 @@ def _get_post_url(bucket_name):
     return "{endpoint}/{bucket_name}".format(endpoint=endpoint, bucket_name=bucket_name)
 
 
+_POST_POLICY_REGION = "us-east-1"
+_POST_POLICY_SERVICE = "s3"
+
+
+def _hmac_sha256(key, message):
+    return hmac.new(key, message, hashlib.sha256).digest()
+
+
+def _sign_v4_post_policy(policy, secret_key, amz_date, region=_POST_POLICY_REGION, service=_POST_POLICY_SERVICE):
+    """
+    Lowercase-hex SigV4 signature of a base64 POST policy.
+
+    The signed string is the policy form value itself. The signature is hex,
+    matching neofs-s3-gw api/auth.signStr, not the base64 HMAC-SHA1 used by SigV2.
+    """
+    if isinstance(policy, str):
+        policy = policy.encode("utf-8")
+    signing_key = _hmac_sha256(("AWS4" + secret_key).encode("utf-8"), amz_date[:8].encode("utf-8"))
+    signing_key = _hmac_sha256(signing_key, region.encode("utf-8"))
+    signing_key = _hmac_sha256(signing_key, service.encode("utf-8"))
+    signing_key = _hmac_sha256(signing_key, b"aws4_request")
+    return hmac.new(signing_key, policy, hashlib.sha256).hexdigest()
+
+
+def _sigv4_post_auth(policy_document, access_key_id=None, secret_access_key=None, include_signature=True):
+    """
+    Encode a POST policy and return the SigV4 form fields the gateway requires.
+
+    x-amz-algorithm, x-amz-credential and x-amz-date are added to a conditions
+    list when one is present. The gateway rejects any other form field that the
+    policy does not mention.
+    """
+    if access_key_id is None:
+        access_key_id = get_main_aws_access_key()
+    if secret_access_key is None:
+        secret_access_key = get_main_aws_secret_key()
+
+    amz_date = datetime.datetime.now(pytz.utc).strftime("%Y%m%dT%H%M%SZ")
+    credential = "{access_key}/{date}/{region}/{service}/aws4_request".format(
+        access_key=access_key_id,
+        date=amz_date[:8],
+        region=_POST_POLICY_REGION,
+        service=_POST_POLICY_SERVICE,
+    )
+
+    for key, conditions in list(policy_document.items()):
+        if key.lower() == "conditions" and isinstance(conditions, list):
+            conditions.extend(
+                [
+                    {"x-amz-algorithm": "AWS4-HMAC-SHA256"},
+                    {"x-amz-credential": credential},
+                    {"x-amz-date": amz_date},
+                ]
+            )
+            break
+
+    policy = base64.b64encode(json.JSONEncoder().encode(policy_document).encode("utf-8")).decode("utf-8")
+    fields = [
+        ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
+        ("x-amz-credential", credential),
+        ("x-amz-date", amz_date),
+        ("policy", policy),
+    ]
+    if include_signature:
+        fields.append(("x-amz-signature", _sign_v4_post_policy(policy, secret_access_key, amz_date)))
+    return OrderedDict(fields)
+
+
 @pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
 def test_post_object_anonymous_request():
     bucket_name = get_new_bucket_name()
@@ -2346,11 +2414,12 @@ def test_post_object_anonymous_request():
 
     client.create_bucket(ACL="public-read-write", Bucket=bucket_name)
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 501
+    assert r.status_code == 501, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_authenticated_request():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2369,38 +2438,29 @@ def test_post_object_authenticated_request():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_authenticated_no_content_type():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket_name()
     client = get_client()
     client.create_bucket(ACL="public-read-write", Bucket=bucket_name)
@@ -2419,35 +2479,25 @@ def test_post_object_authenticated_no_content_type():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_authenticated_request_bad_access_key():
     bucket_name = get_new_bucket_name()
     client = get_client()
@@ -2468,30 +2518,20 @@ def test_post_object_authenticated_request_bad_access_key():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document, access_key_id="foo")
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", "foo"),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    assert r.status_code == 403, r.text
 
 
 @pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
@@ -2512,7 +2552,7 @@ def test_post_object_set_success_code():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 501
+    assert r.status_code == 501, r.text
 
 
 @pytest.mark.skip(reason="object ACL support dropped, see neofs-s3-gw#1275")
@@ -2533,10 +2573,9 @@ def test_post_object_set_invalid_success_code():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 501
+    assert r.status_code == 501, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_upload_larger_than_chunk():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -2556,39 +2595,30 @@ def test_post_object_upload_larger_than_chunk():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     foo_string = "foo" * 1024 * 1024
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", foo_string),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == foo_string
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_set_key_from_filename():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2607,37 +2637,29 @@ def test_post_object_set_key_from_filename():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "${filename}"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("foo.txt", "bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 403 PostPolicyInvalidKeyName: ${filename} is checked against starts-with "foo" before it is replaced.
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_ignored_header():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2656,23 +2678,13 @@ def test_post_object_ignored_header():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("x-ignore-foo", "bar"),
             ("file", ("bar")),
@@ -2680,11 +2692,13 @@ def test_post_object_ignored_header():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
+    assert r.status_code == 204, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_case_insensitive_condition_fields():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2703,36 +2717,32 @@ def test_post_object_case_insensitive_condition_fields():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     foo_string = "foo" * 1024 * 1024
 
     payload = OrderedDict(
         [
             ("kEy", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
             ("aCl", "private"),
-            ("signature", signature),
-            ("pOLICy", policy),
+            ("X-Amz-AlGoRiThM", auth["x-amz-algorithm"]),
+            ("X-Amz-CrEdEnTiAl", auth["x-amz-credential"]),
+            ("X-Amz-DaTe", auth["x-amz-date"]),
+            ("pOLICy", auth["policy"]),
+            ("X-Amz-SiGnAtUrE", auth["x-amz-signature"]),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 403 PostPolicyInvalidKeyName: condition operators are case-sensitive, so StArTs-WiTh is not starts-with.
+    assert r.status_code == 204, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_escaped_field_values():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2751,37 +2761,29 @@ def test_post_object_escaped_field_values():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "\$foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: the policy matched (key is \$foo.txt), then the string content-length-range rejects "3".
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="\$foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_success_redirect_action():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket_name()
     client = get_client()
     client.create_bucket(ACL="public-read-write", Bucket=bucket_name)
@@ -2804,23 +2806,13 @@ def test_post_object_success_redirect_action():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("success_action_redirect", redirect_url),
             ("file", ("bar")),
@@ -2828,7 +2820,8 @@ def test_post_object_success_redirect_action():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 200
+    # Gateway returns 400 InvalidArgument: the string content-length-range rejects "3" before the redirect.
+    assert r.status_code == 200, r.text
     url = r.url
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     assert url == "{rurl}?bucket={bucket}&key={key}&etag=%22{etag}%22".format(
@@ -2839,7 +2832,6 @@ def test_post_object_success_redirect_action():
     )
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_invalid_signature():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -2859,33 +2851,23 @@ def test_post_object_invalid_signature():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )[::-1]
+    auth = _sigv4_post_auth(policy_document)
+    auth["x-amz-signature"] = auth["x-amz-signature"][::-1]
 
     payload = OrderedDict(
         [
             ("key", "\$foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_invalid_access_key():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -2905,34 +2887,25 @@ def test_post_object_invalid_access_key():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document, access_key_id=get_main_aws_access_key()[::-1])
 
     payload = OrderedDict(
         [
             ("key", "\$foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id[::-1]),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_invalid_date_format():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2951,33 +2924,23 @@ def test_post_object_invalid_date_format():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "\$foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    # Gateway returns 500 InternalError: a non-RFC3339 expiration fails json.Unmarshal.
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_no_key_specified():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -2996,33 +2959,24 @@ def test_post_object_no_key_specified():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_missing_signature():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3041,32 +2995,23 @@ def test_post_object_missing_signature():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document, include_signature=False)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    # Gateway returns 403 SignatureDoesNotMatch: a missing x-amz-signature is compared as empty.
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_missing_policy_condition():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3085,34 +3030,25 @@ def test_post_object_missing_policy_condition():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_user_specified_header():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3132,23 +3068,13 @@ def test_post_object_user_specified_header():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("x-amz-meta-foo", "barclamp"),
             ("file", ("bar")),
@@ -3156,13 +3082,15 @@ def test_post_object_user_specified_header():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     assert response["Metadata"]["foo"] == "barclamp"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_request_missing_policy_specified_field():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3182,33 +3110,23 @@ def test_post_object_request_missing_policy_specified_field():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    # Gateway returns 400 InvalidArgument: the string content-length-range rejects the 3-byte body before the missing field is checked.
+    assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_condition_is_case_sensitive():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3228,33 +3146,22 @@ def test_post_object_condition_is_case_sensitive():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_expires_is_case_sensitive():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3274,34 +3181,25 @@ def test_post_object_expires_is_case_sensitive():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_expired_policy():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3320,33 +3218,23 @@ def test_post_object_expired_policy():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    # Gateway returns 400 InvalidArgument for an expired policy.
+    assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_invalid_request_field_value():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3367,22 +3255,12 @@ def test_post_object_invalid_request_field_value():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("x-amz-meta-foo", "barclamp"),
             ("file", ("bar")),
@@ -3390,10 +3268,9 @@ def test_post_object_invalid_request_field_value():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 403
+    assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_missing_expires_condition():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3412,34 +3289,25 @@ def test_post_object_missing_expires_condition():
         ]
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_missing_conditions_list():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3449,33 +3317,23 @@ def test_post_object_missing_conditions_list():
 
     policy_document = {"expiration": expires.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    # Gateway returns 403 PostPolicyInvalidKeyName: a policy with no conditions list fails CheckField.
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_upload_size_limit_exceeded():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3495,34 +3353,25 @@ def test_post_object_upload_size_limit_exceeded():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_missing_content_length_argument():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3541,33 +3390,23 @@ def test_post_object_missing_content_length_argument():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    # Gateway returns 500 InternalError: a 2-element content-length-range fails unmarshal.
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_invalid_content_length_argument():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3587,33 +3426,22 @@ def test_post_object_invalid_content_length_argument():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
 def test_post_object_upload_size_below_minimum():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3633,34 +3461,25 @@ def test_post_object_upload_size_below_minimum():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_upload_size_rgw_chunk_size_bug():
+    # This test currently fails, see the comment below.
     # Test for https://tracker.ceph.com/issues/58627
     # TODO: if this value is different in Teuthology runs, this would need tuning
     # https://github.com/ceph/ceph/blob/main/qa/suites/rgw/verify/striping%24/stripe-greater-than-chunk.yaml
@@ -3695,34 +3514,26 @@ def test_post_object_upload_size_rgw_chunk_size_bug():
 
     test_payload = "x" * test_payload_size
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", (test_payload)),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "4194504" fails max "12582912".
+    assert r.status_code == 204, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_empty_conditions():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3735,30 +3546,21 @@ def test_post_object_empty_conditions():
         "conditions": [{}],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 400
+    # Gateway returns 403 PostPolicyInvalidKeyName: an empty condition unmarshals as eq with an empty key.
+    assert r.status_code == 400, r.text
 
 
 def test_get_object_ifmatch_good():
@@ -8221,7 +8023,7 @@ def _cors_request_and_check(
     func, url, headers, expect_status, expect_allow_origin, expect_allow_methods
 ):
     r = func(url, headers=headers, verify=get_config_ssl_verify())
-    assert r.status_code == expect_status
+    assert r.status_code == expect_status, r.text
 
     assert r.headers.get("access-control-allow-origin", None) == expect_allow_origin
     assert r.headers.get("access-control-allow-methods", None) == expect_allow_methods
@@ -12331,23 +12133,13 @@ def test_encryption_sse_c_post_object_authenticated_request():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
             (
@@ -12363,7 +12155,7 @@ def test_encryption_sse_c_post_object_authenticated_request():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    assert r.status_code == 204, r.text
 
     get_headers = {
         "x-amz-server-side-encryption-customer-algorithm": "AES256",
@@ -12652,23 +12444,13 @@ def test_sse_kms_post_object_authenticated_request():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("x-amz-server-side-encryption", "aws:kms"),
             ("x-amz-server-side-encryption-aws-kms-key-id", kms_keyid),
@@ -12677,7 +12459,7 @@ def test_sse_kms_post_object_authenticated_request():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    assert r.status_code == 204, r.text
 
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
@@ -13397,7 +13179,7 @@ def test_post_object_tags_anonymous_request():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key=key_name)
     body = _get_body(response)
     assert body == "bar"
@@ -13407,8 +13189,9 @@ def test_post_object_tags_anonymous_request():
 
 
 @pytest.mark.tagging
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/46")
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_tags_authenticated_request():
+    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -13432,23 +13215,13 @@ def test_post_object_tags_authenticated_request():
     # There is not a simple way to change input_tagset to xml like there is in the boto2 tetss
     xml_input_tagset = "<Tagging><TagSet><Tag><Key>0</Key><Value>0</Value></Tag><Tag><Key>1</Key><Value>1</Value></Tag></TagSet></Tagging>"
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("tagging", xml_input_tagset),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
@@ -13456,7 +13229,8 @@ def test_post_object_tags_authenticated_request():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    assert r.status_code == 204
+    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
+    assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == "bar"
@@ -16286,30 +16060,20 @@ def test_sse_s3_default_post_object_authenticated_request():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload)
-    assert r.status_code == 204
+    assert r.status_code == 204, r.text
 
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     assert (
@@ -16348,30 +16112,20 @@ def test_sse_kms_default_post_object_authenticated_request():
         ],
     }
 
-    json_policy_document = json.JSONEncoder().encode(policy_document)
-    bytes_json_policy_document = bytes(json_policy_document, "utf-8")
-    policy = base64.b64encode(bytes_json_policy_document)
-    aws_secret_access_key = get_main_aws_secret_key()
-    aws_access_key_id = get_main_aws_access_key()
-
-    signature = base64.b64encode(
-        hmac.new(bytes(aws_secret_access_key, "utf-8"), policy, hashlib.sha1).digest()
-    )
+    auth = _sigv4_post_auth(policy_document)
 
     payload = OrderedDict(
         [
             ("key", "foo.txt"),
-            ("AWSAccessKeyId", aws_access_key_id),
+            *auth.items(),
             ("acl", "private"),
-            ("signature", signature),
-            ("policy", policy),
             ("Content-Type", "text/plain"),
             ("file", ("bar")),
         ]
     )
 
     r = requests.post(url, files=payload)
-    assert r.status_code == 204
+    assert r.status_code == 204, r.text
 
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     assert (
