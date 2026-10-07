@@ -40,6 +40,7 @@ neofs-node
 neofs-rest-gw
 neofs-s3-authmate
 neofs-s3-gw
+aws-cli-local
 neofs-contract
 neofs_env_*.zip
 temp_files.zip
