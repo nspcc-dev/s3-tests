@@ -1907,6 +1907,7 @@ def _do_wait_completion(t):
         thr.join()
 
 
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/111")
 def test_bucket_concurrent_set_canned_acl():
     bucket_name = get_new_bucket()
     client = get_client()
