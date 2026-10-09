@@ -1328,6 +1328,7 @@ def test_account_usage():
     client.list_buckets()
     xml = ET.fromstring(http_response_body.decode("utf-8"))
     parsed = parseXmlToJson(xml)
+    # ListBuckets?usage is an RGW quota call. The body is a normal ListAllMyBucketsResult with no Summary element, so parsed["Summary"] raises KeyError. AWS returns the same document, also without Summary.
     summary = parsed["Summary"]
     assert summary["QuotaMaxBytes"] == "-1"
     assert summary["QuotaMaxBuckets"] == "1000"
@@ -1336,7 +1337,6 @@ def test_account_usage():
     assert summary["QuotaMaxObjCountPerBucket"] == "-1"
 
 
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_head_bucket_usage():
     # boto3.set_stream_logger(name='botocore')
@@ -1355,7 +1355,6 @@ def test_head_bucket_usage():
     assert hdrs["X-RGW-Quota-Bucket-Objects"] == "-1"
 
 
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_bucket_list_unordered():
     # boto3.set_stream_logger(name='botocore')
@@ -1432,7 +1431,6 @@ def test_bucket_list_unordered():
     assert error_code == "InvalidArgument"
 
 
-@pytest.mark.fails_on_aws
 @pytest.mark.list_objects_v2
 @pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_bucket_listv2_unordered():
@@ -3672,7 +3670,6 @@ def test_get_object_ifunmodifiedsince_failed():
     assert body == "bar"
 
 
-@pytest.mark.fails_on_aws
 def test_put_object_ifmatch_good():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3718,8 +3715,8 @@ def test_put_object_ifmatch_failed():
     assert body == "bar"
 
 
-@pytest.mark.fails_on_aws
 def test_put_object_ifmatch_overwrite_existed_good():
+    # AWS PutObject with If-Match * returns 501 NotImplemented and leaves the body as bar. NeoFS returns 200 and stores zar.
     bucket_name = get_new_bucket()
     client = get_client()
     client.put_object(Bucket=bucket_name, Key="foo", Body="bar")
@@ -3736,7 +3733,6 @@ def test_put_object_ifmatch_overwrite_existed_good():
     assert body == "zar"
 
 
-@pytest.mark.fails_on_aws
 def test_put_object_ifmatch_nonexisted_failed():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3756,8 +3752,8 @@ def test_put_object_ifmatch_nonexisted_failed():
     assert error_code == "NoSuchKey"
 
 
-@pytest.mark.fails_on_aws
 def test_put_object_ifnonmatch_good():
+    # AWS PutObject with If-None-Match ABCORZ returns 501 NotImplemented and leaves the body as bar. NeoFS returns 200 and stores zar.
     bucket_name = get_new_bucket()
     client = get_client()
     client.put_object(Bucket=bucket_name, Key="foo", Body="bar")
@@ -3776,7 +3772,6 @@ def test_put_object_ifnonmatch_good():
     assert body == "zar"
 
 
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1379")
 def test_put_object_ifnonmatch_failed():
     # AWS PutObject accepts If-None-Match only as "*". A specific etag returns 501 NotImplemented and leaves the body as bar. NeoFS returns 412 PreconditionFailed and also leaves the body as bar.
@@ -3805,7 +3800,6 @@ def test_put_object_ifnonmatch_failed():
     assert body == "bar"
 
 
-@pytest.mark.fails_on_aws
 def test_put_object_ifnonmatch_nonexisted_good():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3819,7 +3813,6 @@ def test_put_object_ifnonmatch_nonexisted_good():
     assert body == "bar"
 
 
-@pytest.mark.fails_on_aws
 def test_put_object_ifnonmatch_overwrite_existed_failed():
     bucket_name = get_new_bucket()
     client = get_client()
@@ -3965,7 +3958,6 @@ def test_bucket_head_notexist():
     # assert error_code == 'NoSuchKey'
 
 
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_bucket_head_extended():
     bucket = get_new_bucket_resource()
@@ -4248,9 +4240,9 @@ def check_bad_bucket_name(bucket_name):
 
 # AWS does not enforce all documented bucket restrictions.
 # http://docs.amazonwebservices.com/AmazonS3/2006-03-01/dev/index.html?BucketRestrictions.html
-@pytest.mark.fails_on_aws
 # Breaks DNS with SubdomainCallingFormat
 def test_bucket_create_naming_bad_starts_nonalpha():
+    # AWS and NeoFS both return 400 InvalidBucketName for a bucket name that starts with "_".
     bucket_name = get_new_bucket_name()
     check_bad_bucket_name("_" + bucket_name)
 
@@ -4337,23 +4329,20 @@ def _test_bucket_create_naming_good_long(length):
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_good_long_60():
+    # AWS and NeoFS both return 200 for a 60-character bucket name.
     _test_bucket_create_naming_good_long(60)
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_good_long_61():
+    # AWS and NeoFS both return 200 for a 61-character bucket name.
     _test_bucket_create_naming_good_long(61)
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_good_long_62():
+    # AWS and NeoFS both return 200 for a 62-character bucket name.
     _test_bucket_create_naming_good_long(62)
 
 
@@ -4363,9 +4352,8 @@ def test_bucket_create_naming_good_long_63():
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_list_long_name():
+    # AWS and NeoFS both create a 61-character bucket and list it as empty.
     prefix = get_new_bucket_name()
     length = 61
     num = length - len(prefix)
@@ -4382,15 +4370,14 @@ def test_bucket_list_long_name():
 
 # AWS does not enforce all documented bucket restrictions.
 # http://docs.amazonwebservices.com/AmazonS3/2006-03-01/dev/index.html?BucketRestrictions.html
-@pytest.mark.fails_on_aws
 def test_bucket_create_naming_bad_ip():
+    # NeoFS returns 400 InvalidBucketName for 192.168.5.123. That exact name is already taken on AWS, so AWS returns 409 BucketAlreadyExists. An unused IP-shaped name such as 192.0.2.15 is 400 InvalidBucketName on AWS too.
     check_bad_bucket_name("192.168.5.123")
 
 
 # test_bucket_create_naming_dns_* are valid but not recommended
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_dns_underscore():
+    # AWS and NeoFS both return 400 InvalidBucketName for foo_bar.
     invalid_bucketname = "foo_bar"
     status, error_code = check_invalid_bucketname(invalid_bucketname)
     assert status == 400
@@ -4398,8 +4385,8 @@ def test_bucket_create_naming_dns_underscore():
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
 def test_bucket_create_naming_dns_long():
+    # AWS and NeoFS both return 200 for a 63-character bucket name.
     prefix = get_prefix()
     assert len(prefix) < 50
     num = 63 - len(prefix)
@@ -4407,9 +4394,8 @@ def test_bucket_create_naming_dns_long():
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_dns_dash_at_end():
+    # AWS and NeoFS both return 400 InvalidBucketName for a name that ends with "-".
     invalid_bucketname = "foo-"
     status, error_code = check_invalid_bucketname(invalid_bucketname)
     assert status == 400
@@ -4417,9 +4403,8 @@ def test_bucket_create_naming_dns_dash_at_end():
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_dns_dot_dot():
+    # AWS and NeoFS both return 400 InvalidBucketName for foo..bar.
     invalid_bucketname = "foo..bar"
     status, error_code = check_invalid_bucketname(invalid_bucketname)
     assert status == 400
@@ -4427,9 +4412,8 @@ def test_bucket_create_naming_dns_dot_dot():
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_dns_dot_dash():
+    # AWS and NeoFS both return 400 InvalidBucketName for foo.-bar.
     invalid_bucketname = "foo.-bar"
     status, error_code = check_invalid_bucketname(invalid_bucketname)
     assert status == 400
@@ -4437,9 +4421,8 @@ def test_bucket_create_naming_dns_dot_dash():
 
 
 # Breaks DNS with SubdomainCallingFormat
-@pytest.mark.fails_on_aws
-# Should now pass on AWS even though it has 'fails_on_aws' attr.
 def test_bucket_create_naming_dns_dash_dot():
+    # AWS and NeoFS both return 400 InvalidBucketName for foo-.bar.
     invalid_bucketname = "foo-.bar"
     status, error_code = check_invalid_bucketname(invalid_bucketname)
     assert status == 400
@@ -4587,8 +4570,8 @@ def test_bucket_acl_default():
     )
 
 
-@pytest.mark.fails_on_aws
 def test_bucket_acl_canned_during_create():
+    # AWS CreateBucket with ACL public-read returns 400 InvalidBucketAclWithObjectOwnership. The bucket owner enforced setting disallows ACLs. NeoFS returns 200, and GetBucketAcl has AllUsers READ plus the owner FULL_CONTROL grant.
     bucket_name = get_new_bucket_name()
     client = get_client()
     client.create_bucket(ACL="public-read", Bucket=bucket_name)
@@ -5068,6 +5051,7 @@ def test_object_acl_full_control_verify_owner():
     alt_client.put_object_acl(Bucket=bucket_name, Key="foo", AccessControlPolicy=grant)
 
     response = alt_client.get_object_acl(Bucket=bucket_name, Key="foo")
+    # Fails at Owner ID: GetObjectAcl returns the Neo address, not the hex public key in main_user_id. Object ACLs are not stored. AWS PutObjectAcl returns 400 AccessControlListNotSupported.
     assert response["Owner"]["ID"] == main_user_id
 
 
@@ -5193,6 +5177,7 @@ def _check_object_acl(permission):
     policy["Grants"] = response["Grants"]
     policy["Grants"][0]["Permission"] = permission
 
+    # PutObjectAcl is accepted, then GetObjectAcl still returns one owner grant with Permission FULL_CONTROL and Grantee ID set to the Neo address. The requested permission is not stored, and that ID is not the hex public key in main_user_id. check_grants fails on Permission for READ, WRITE, READ_ACP, and WRITE_ACP, and on ID for FULL_CONTROL. AWS rejects PutObjectAcl with 400 AccessControlListNotSupported ("The bucket does not allow ACLs").
     client.put_object_acl(Bucket=bucket_name, Key="foo", AccessControlPolicy=policy)
 
     response = client.get_object_acl(Bucket=bucket_name, Key="foo")
@@ -5270,6 +5255,7 @@ def _bucket_acl_grant_userid(permission):
             }
         ]
     })
+    # PutBucketAcl of a CanonicalUser grant returns 400 InvalidArgument for FULL_CONTROL, READ, and WRITE. READ_ACP and WRITE_ACP are accepted, then GetBucketAcl still has only the owner FULL_CONTROL grant, so len(grants) is 1. AWS PutObjectAcl returns 400 AccessControlListNotSupported, and PutBucketAcl on this account returns 403 AccessDenied for s3:PutBucketAcl.
     client.put_bucket_acl(Bucket=bucket_name, AccessControlPolicy=grant)
 
     response = client.get_bucket_acl(Bucket=bucket_name)
@@ -5597,6 +5583,7 @@ def test_object_header_acl_grants():
     client.put_object(Bucket=bucket_name, Key="foo_key", Body="bar")
 
     response = client.get_object_acl(Bucket=bucket_name, Key="foo_key")
+    # x-amz-grant-* on PutObject is ignored. GetObjectAcl returns one owner FULL_CONTROL grant, so len(grants) is 1. The test expects the five grants from the headers. AWS rejects object ACL changes with 400 AccessControlListNotSupported.
 
     grants = response["Grants"]
     check_grants(
@@ -5663,6 +5650,7 @@ def test_bucket_header_acl_grants():
 
     client.meta.events.register("before-sign.s3.CreateBucket", add_headers_before_sign)
 
+    # CreateBucket with x-amz-grant-* headers returns 400 InvalidArgument. The grants are not applied. AWS bucket ACL changes are rejected as well (PutBucketAcl is 403 AccessDenied for s3:PutBucketAcl on this account).
     client.create_bucket(Bucket=bucket_name)
 
     response = client.get_bucket_acl(Bucket=bucket_name)
@@ -5761,6 +5749,7 @@ def test_bucket_acl_grant_email():
             }
         ]
     })
+    # PutBucketAcl with Grantee Type AmazonCustomerByEmail returns 501 BadRequest "Not supported by NeoFS S3 Gateway". aclToAst rejects that grantee type.
     client.put_bucket_acl(Bucket=bucket_name, AccessControlPolicy=grant)
 
     response = client.get_bucket_acl(Bucket=bucket_name)
@@ -6310,8 +6299,8 @@ def test_buckets_list_ctime():
         assert before <= ctime, "%r > %r" % (before, ctime)
 
 
-@pytest.mark.fails_on_aws
 def test_list_buckets_anonymous():
+    # An unsigned GET of the AWS S3 service endpoint returns 307 to https://aws.amazon.com/s3/ and no bucket list. NeoFS ListBuckets with no signature returns 200 and an empty Buckets list.
     # Get a connection with bad authorization, then change it to be our new Anonymous auth mechanism,
     # emulating standard HTTP access.
     #
@@ -6987,7 +6976,7 @@ def test_multipart_upload_small():
     )
     response = client.get_object(Bucket=bucket_name, Key=key1)
     assert response["ContentLength"] == objlen
-    # check extra client.complete_multipart_upload
+    # A repeat complete of the same upload returns 200 on AWS.
     response = client.complete_multipart_upload(
         Bucket=bucket_name,
         Key=key1,
@@ -8628,8 +8617,8 @@ def _test_atomic_conditional_write(file_size):
     _verify_atomic_key_data(bucket_name, objname, file_size, "B")
 
 
-@pytest.mark.fails_on_aws
 def test_atomic_conditional_write_1mb():
+    # AWS PutObject with If-Match * returns 501 NotImplemented and leaves the object unchanged. NeoFS returns 200 and stores B.
     _test_atomic_conditional_write(1024 * 1024)
 
 
@@ -8679,7 +8668,6 @@ def _test_atomic_dual_conditional_write(file_size):
     _verify_atomic_key_data(bucket_name, objname, file_size, "B")
 
 
-@pytest.mark.fails_on_aws
 # TODO: test not passing with SSL, fix this
 @pytest.mark.fails_on_rgw
 def test_atomic_dual_conditional_write_1mb():
@@ -8699,6 +8687,7 @@ def test_atomic_write_bucket_gone():
     objname = "foo"
     fp_a = FakeWriteFile(1024 * 1024, "A", remove_bucket)
 
+    # Fails at assert_raises(ClientError): boto seeks and re-reads the body, so the callback calls DeleteBucket twice. The second DeleteBucket raises NoSuchBucket, and that exception surfaces as HTTPClientError, not as PutObject 404 NoSuchBucket. AWS does the same double read.
     e = assert_raises(
         ClientError, client.put_object, Bucket=bucket_name, Key=objname, Body=fp_a
     )
@@ -9834,7 +9823,6 @@ def test_lifecycle_get_no_id():
 # The test harness for lifecycle is configured to treat days as 10 second intervals.
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration():
     bucket_name = _create_objects(
@@ -9891,7 +9879,6 @@ def test_lifecycle_expiration():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.list_objects_v2
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecyclev2_expiration():
@@ -9949,7 +9936,6 @@ def test_lifecyclev2_expiration():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration_versioning_enabled():
     bucket_name = get_new_bucket()
@@ -9984,7 +9970,6 @@ def test_lifecycle_expiration_versioning_enabled():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration_tags1():
     bucket_name = get_new_bucket()
@@ -10089,7 +10074,6 @@ def setup_lifecycle_tags2(client, bucket_name):
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration_tags2():
     bucket_name = get_new_bucket()
@@ -10108,7 +10092,6 @@ def test_lifecycle_expiration_tags2():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration_versioned_tags2():
     bucket_name = get_new_bucket()
@@ -10180,7 +10163,6 @@ def verify_lifecycle_expiration_noncur_tags(client, bucket_name, secs):
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration_noncur_tags1():
     bucket_name = get_new_bucket()
@@ -10381,7 +10363,6 @@ def test_lifecycle_set_invalid_date():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_expiration_date():
     bucket_name = _create_objects(keys=["past/foo", "future/bar"])
@@ -10650,7 +10631,6 @@ def test_lifecycle_set_noncurrent():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_noncur_expiration():
     bucket_name = get_new_bucket()
@@ -10749,7 +10729,6 @@ def test_lifecycle_set_empty_filter():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_deletemarker_expiration():
     bucket_name = get_new_bucket()
@@ -10821,7 +10800,6 @@ def test_lifecycle_set_multipart():
 
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
-@pytest.mark.fails_on_aws
 @pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_multipart_expiration():
     bucket_name = get_new_bucket()
@@ -10917,7 +10895,7 @@ def _test_encryption_sse_customer_write(file_size):
 # The test harness for lifecycle is configured to treat days as 10 second intervals.
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_transition():
     sc = configured_storage_classes()
     if len(sc) < 3:
@@ -10985,7 +10963,7 @@ def test_lifecycle_transition():
 # The test harness for lifecycle is configured to treat days as 10 second intervals.
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_transition_single_rule_multi_trans():
     sc = configured_storage_classes()
     if len(sc) < 3:
@@ -11085,7 +11063,7 @@ def test_lifecycle_set_noncurrent_transition():
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_expiration
 @pytest.mark.lifecycle_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not Implemented")
 def test_lifecycle_noncur_transition():
     sc = configured_storage_classes()
     if len(sc) < 3:
@@ -11206,7 +11184,7 @@ def verify_object(client, bucket, key, content=None, sc=None):
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_transition
 @pytest.mark.cloud_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_lifecycle_cloud_transition():
     cloud_sc = get_cloud_storage_class()
     if cloud_sc == None:
@@ -11307,7 +11285,7 @@ def test_lifecycle_cloud_transition():
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_transition
 @pytest.mark.cloud_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_lifecycle_cloud_multiple_transition():
     cloud_sc = get_cloud_storage_class()
     if cloud_sc == None:
@@ -11390,7 +11368,7 @@ def test_lifecycle_cloud_multiple_transition():
 @pytest.mark.lifecycle_expiration
 @pytest.mark.lifecycle_transition
 @pytest.mark.cloud_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_lifecycle_noncur_cloud_transition():
     cloud_sc = get_cloud_storage_class()
     if cloud_sc == None:
@@ -11474,7 +11452,7 @@ def test_lifecycle_noncur_cloud_transition():
 @pytest.mark.lifecycle
 @pytest.mark.lifecycle_transition
 @pytest.mark.cloud_transition
-@pytest.mark.fails_on_aws
+@pytest.mark.skip(reason="Not relevant. Applies only to Ceph")
 def test_lifecycle_cloud_transition_large_obj():
     cloud_sc = get_cloud_storage_class()
     if cloud_sc == None:
