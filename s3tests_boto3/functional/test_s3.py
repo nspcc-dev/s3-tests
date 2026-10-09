@@ -13,6 +13,7 @@ import ssl
 import string
 import threading
 import time
+import urllib.parse
 import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict, namedtuple
 
@@ -2784,7 +2785,6 @@ def test_post_object_escaped_field_values():
 
 @pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_success_redirect_action():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket_name()
     client = get_client()
     client.create_bucket(ACL="public-read-write", Bucket=bucket_name)
@@ -2821,16 +2821,15 @@ def test_post_object_success_redirect_action():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: the string content-length-range rejects "3" before the redirect.
     assert r.status_code == 200, r.text
-    url = r.url
+    url = urllib.parse.urlsplit(r.url)
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
-    assert url == "{rurl}?bucket={bucket}&key={key}&etag=%22{etag}%22".format(
-        rurl=redirect_url,
-        bucket=bucket_name,
-        key="foo.txt",
-        etag=response["ETag"].strip('"'),
-    )
+    assert urllib.parse.urlunsplit(url._replace(query="")) == redirect_url
+    assert urllib.parse.parse_qs(url.query) == {
+        "bucket": [bucket_name],
+        "key": ["foo.txt"],
+        "etag": ['"{}"'.format(response["ETag"].strip('"'))],
+    }
 
 
 def test_post_object_invalid_signature():
