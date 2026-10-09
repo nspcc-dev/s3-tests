@@ -2419,9 +2419,7 @@ def test_post_object_anonymous_request():
     assert r.status_code == 501, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_authenticated_request():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2453,16 +2451,13 @@ def test_post_object_authenticated_request():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
     assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_authenticated_no_content_type():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket_name()
     client = get_client()
     client.create_bucket(ACL="public-read-write", Bucket=bucket_name)
@@ -2493,7 +2488,6 @@ def test_post_object_authenticated_no_content_type():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
     assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
@@ -2618,9 +2612,7 @@ def test_post_object_upload_larger_than_chunk():
     assert body == foo_string
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_set_key_from_filename():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2652,16 +2644,13 @@ def test_post_object_set_key_from_filename():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 403 PostPolicyInvalidKeyName: ${filename} is checked against starts-with "foo" before it is replaced.
     assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_ignored_header():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2694,13 +2683,10 @@ def test_post_object_ignored_header():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
     assert r.status_code == 204, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_case_insensitive_condition_fields():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2738,13 +2724,10 @@ def test_post_object_case_insensitive_condition_fields():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 403 PostPolicyInvalidKeyName: condition operators are case-sensitive, so StArTs-WiTh is not starts-with.
     assert r.status_code == 204, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_escaped_field_values():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2776,14 +2759,12 @@ def test_post_object_escaped_field_values():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: the policy matched (key is \$foo.txt), then the string content-length-range rejects "3".
     assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="\$foo.txt")
     body = _get_body(response)
     assert body == "bar"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_success_redirect_action():
     bucket_name = get_new_bucket_name()
     client = get_client()
@@ -2903,9 +2884,7 @@ def test_post_object_invalid_access_key():
     assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_invalid_date_format():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -2937,7 +2916,6 @@ def test_post_object_invalid_date_format():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 500 InternalError: a non-RFC3339 expiration fails json.Unmarshal.
     assert r.status_code == 400, r.text
 
 
@@ -2974,9 +2952,7 @@ def test_post_object_no_key_specified():
     assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_missing_signature():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3008,7 +2984,6 @@ def test_post_object_missing_signature():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 403 SignatureDoesNotMatch: a missing x-amz-signature is compared as empty.
     assert r.status_code == 400, r.text
 
 
@@ -3046,9 +3021,7 @@ def test_post_object_missing_policy_condition():
     assert r.status_code == 403, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_user_specified_header():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3082,15 +3055,12 @@ def test_post_object_user_specified_header():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
     assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     assert response["Metadata"]["foo"] == "barclamp"
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_request_missing_policy_specified_field():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3123,7 +3093,6 @@ def test_post_object_request_missing_policy_specified_field():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: the string content-length-range rejects the 3-byte body before the missing field is checked.
     assert r.status_code == 403, r.text
 
 
@@ -3197,9 +3166,7 @@ def test_post_object_expires_is_case_sensitive():
     assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_expired_policy():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3231,7 +3198,6 @@ def test_post_object_expired_policy():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument for an expired policy.
     assert r.status_code == 403, r.text
 
 
@@ -3305,9 +3271,7 @@ def test_post_object_missing_expires_condition():
     assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_missing_conditions_list():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3330,7 +3294,6 @@ def test_post_object_missing_conditions_list():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 403 PostPolicyInvalidKeyName: a policy with no conditions list fails CheckField.
     assert r.status_code == 400, r.text
 
 
@@ -3369,9 +3332,7 @@ def test_post_object_upload_size_limit_exceeded():
     assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_missing_content_length_argument():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3403,7 +3364,6 @@ def test_post_object_missing_content_length_argument():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 500 InternalError: a 2-element content-length-range fails unmarshal.
     assert r.status_code == 400, r.text
 
 
@@ -3477,9 +3437,7 @@ def test_post_object_upload_size_below_minimum():
     assert r.status_code == 400, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_upload_size_rgw_chunk_size_bug():
-    # This test currently fails, see the comment below.
     # Test for https://tracker.ceph.com/issues/58627
     # TODO: if this value is different in Teuthology runs, this would need tuning
     # https://github.com/ceph/ceph/blob/main/qa/suites/rgw/verify/striping%24/stripe-greater-than-chunk.yaml
@@ -3527,13 +3485,10 @@ def test_post_object_upload_size_rgw_chunk_size_bug():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "4194504" fails max "12582912".
     assert r.status_code == 204, r.text
 
 
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_empty_conditions():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -3559,7 +3514,6 @@ def test_post_object_empty_conditions():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 403 PostPolicyInvalidKeyName: an empty condition unmarshals as eq with an empty key.
     assert r.status_code == 400, r.text
 
 
@@ -13189,9 +13143,7 @@ def test_post_object_tags_anonymous_request():
 
 
 @pytest.mark.tagging
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1367")
 def test_post_object_tags_authenticated_request():
-    # This test currently fails, see the comment below.
     bucket_name = get_new_bucket()
     client = get_client()
 
@@ -13229,7 +13181,6 @@ def test_post_object_tags_authenticated_request():
     )
 
     r = requests.post(url, files=payload, verify=get_config_ssl_verify())
-    # Gateway returns 400 InvalidArgument: content-length-range is compared as strings, so "3" fails 0-1024.
     assert r.status_code == 204, r.text
     response = client.get_object(Bucket=bucket_name, Key="foo.txt")
     body = _get_body(response)
