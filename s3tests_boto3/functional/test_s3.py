@@ -16,6 +16,7 @@ import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict, namedtuple
+from email.header import Header, decode_header, make_header
 
 import botocore.session
 import dateutil.parser
@@ -2244,24 +2245,27 @@ def test_object_set_get_metadata_overwrite_to_empty():
     assert error_code == "InvalidArgument"
 
 
-# TODO: the decoding of this unicode metadata is not happening properly for unknown reasons
-@pytest.mark.fails_on_rgw
-@pytest.mark.skip(reason="https://github.com/nspcc-dev/s3-tests/issues/58")
 def test_object_set_get_unicode_metadata():
+    # PUT x-amz-meta-meta1: Hello Worldé, with no RFC 2047 encoding.
+    # AWS returns =?UTF-8?Q?Hello_World=C3=83=C2=A9?=.
+    # NeoFS returns "Hello WorldÃ©".
+    #
+    # PUT x-amz-meta-meta1: =?utf-8?q?Hello_World=C3=A9?= ("Hello Worldé").
+    # AWS returns =?UTF-8?Q?Hello_World=C3=A9?=.
+    # NeoFS returns =?utf-8?q?Hello_World=C3=A9?=.
+    # Both decode to "Hello Worldé".
     bucket_name = get_new_bucket()
     client = get_client()
+    metadata = "Hello World\xe9"
+    encoded = Header(metadata, "utf-8").encode()
 
-    def set_unicode_metadata(**kwargs):
-        kwargs["params"]["headers"]["x-amz-meta-meta1"] = "Hello World\xe9"
-
-    client.meta.events.register("before-call.s3.PutObject", set_unicode_metadata)
-    client.put_object(Bucket=bucket_name, Key="foo", Body="bar")
+    client.put_object(
+        Bucket=bucket_name, Key="foo", Body="bar", Metadata={"meta1": encoded}
+    )
 
     response = client.get_object(Bucket=bucket_name, Key="foo")
-    got = response["Metadata"]["meta1"]
-    print(got)
-    print("Hello World\xe9")
-    assert got == "Hello World\xe9"
+    got = str(make_header(decode_header(response["Metadata"]["meta1"])))
+    assert got == metadata
 
 
 @allure.step("Set and Get Unreadable Metadata")
