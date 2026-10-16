@@ -150,10 +150,7 @@ def _remove_header_create_bad_bucket(remove, client=None):
 
 
 @pytest.mark.auth_common
-@pytest.mark.skip(reason="Not Implemented")
 def test_object_create_bad_md5_invalid_short():
-    # content-md5-deprecated: This test currently fails, see the comment below.
-    # Fails at assert_raises(ClientError): PutObject with Content-MD5 YWJyYWNhZGFicmE= returns 200. AWS returns 400 InvalidDigest. The compat doc marks Content-MD5 as deprecated, and PutObject does not check the digest.
     e = _add_header_create_bad_object({"Content-MD5": "YWJyYWNhZGFicmE="})
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 400
@@ -161,10 +158,7 @@ def test_object_create_bad_md5_invalid_short():
 
 
 @pytest.mark.auth_common
-@pytest.mark.skip(reason="Not Implemented")
 def test_object_create_bad_md5_bad():
-    # content-md5-deprecated: This test currently fails, see the comment below.
-    # Fails at assert_raises(ClientError): PutObject with Content-MD5 rL0Y20xC+Fzt72VPzMSk2A== returns 200. AWS returns 400 BadDigest. The compat doc marks Content-MD5 as deprecated, and PutObject does not check the digest.
     e = _add_header_create_bad_object({"Content-MD5": "rL0Y20xC+Fzt72VPzMSk2A=="})
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 400
@@ -172,10 +166,7 @@ def test_object_create_bad_md5_bad():
 
 
 @pytest.mark.auth_common
-@pytest.mark.skip(reason="Not Implemented")
 def test_object_create_bad_md5_empty():
-    # content-md5-deprecated: This test currently fails, see the comment below.
-    # Fails at assert_raises(ClientError): PutObject with an empty Content-MD5 returns 200. AWS returns 400 InvalidDigest. The compat doc marks Content-MD5 as deprecated, and PutObject does not check the digest.
     e = _add_header_create_bad_object({"Content-MD5": ""})
     status, error_code = _get_status_and_error_code(e.response)
     assert status == 400
