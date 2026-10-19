@@ -65,19 +65,17 @@ def init_s3_credentials(
     )
     
     cmd = (
-        f"{neofs_env.neofs_s3_authmate_path} --debug --with-log --timeout 1m "
+        f"{neofs_env.neofs_s3_authmate_path} --timeout 1m "
         f"issue-secret --wallet {wallet.path} --gate-public-key={gate_public_key} "
         f"--peer {neofs_env.storage_nodes[0].endpoint} "
         f"--container-placement-policy 'REP 1' "
         f"--container-policy {os.getcwd()}/container_policy.json"
     )
-    
-    logger.info(f"Executing command: {cmd}")
+
+    logger.info("Issuing S3 credentials")
 
     try:
         output = _run_with_passwd(cmd, wallet.password)
-        
-        logger.info(f"output: {output}")
 
         # output contains some debug info and then several JSON structures, so we find each
         # JSON structure by curly brackets (naive approach, but works while JSON is not nested)

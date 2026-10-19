@@ -169,6 +169,22 @@ KC_REALM=<name of the realm>
     ```
 Also, if you don't want to see all debug output you can append a parameter `--logging-level=ERROR`.  For more info see [here](https://nose.readthedocs.io/en/latest/usage.html).
 
+## Debugging your own S3 gate
+
+Use your binary:
+
+```bash
+NEOFS_S3_GW_BIN=/path/to/neofs-s3-gw pytest -s s3tests_boto3/functional/test_s3.py
+```
+
+The run prints the generated gate config and its pid. That file has the listen address, wallet, TLS certificate and key, FS-chain endpoint, and storage-node peers. Stop that pid and start your gate with the printed `--config` path. `--persist-env` keeps the environment, `--load-env <pickle>` reuses it.
+
+To launch the gate with your own file, paste those values into it. The file is used as-is:
+
+```bash
+S3_GW_CONFIG_PATH=/path/to/your/config.yaml pytest -s --load-env <pickle> s3tests_boto3/functional/test_s3.py
+```
+
 ## Docker run
 
 In case of issues with environment setup, run tests from Docker environment. 
