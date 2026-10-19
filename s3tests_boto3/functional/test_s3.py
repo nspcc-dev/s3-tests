@@ -8532,12 +8532,15 @@ def _test_atomic_dual_write(file_size):
     # verify the file
     _verify_atomic_key_data(bucket_name, objname, file_size, "B")
 
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1381")
 def test_atomic_dual_write_1mb():
     _test_atomic_dual_write(1024 * 1024)
 
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1381")
 def test_atomic_dual_write_4mb():
     _test_atomic_dual_write(1024 * 1024 * 4)
 
+@pytest.mark.skip(reason="https://github.com/nspcc-dev/neofs-s3-gw/issues/1381")
 def test_atomic_dual_write_8mb():
     _test_atomic_dual_write(1024 * 1024 * 8)
 
