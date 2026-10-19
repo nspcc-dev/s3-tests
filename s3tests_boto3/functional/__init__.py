@@ -922,15 +922,78 @@ def get_lc_debug_interval():
     return config.lc_debug_interval
 
 
+_VALUE_PREVIEW_LIMIT = 500
+_ALLURE_ATTACH_LIMIT = 4096
+
+
+def _truncate(text, limit):
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... <truncated, total {len(text)} chars>"
+
+
+def _describe_payload(value, limit=_VALUE_PREVIEW_LIMIT):
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<{type(value).__name__} length={len(value)}>"
+    if isinstance(value, dict):
+        return {key: _describe_payload(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        described = [_describe_payload(item, limit) for item in value]
+        return tuple(described) if isinstance(value, tuple) else described
+    if hasattr(value, "read") and not isinstance(value, str):
+        return f"<{type(value).__name__}{_file_details(value)}>"
+    text = value if isinstance(value, str) else str(value)
+    return _truncate(text, limit)
+
+
+def _file_details(value):
+    details = []
+    seekable = getattr(value, "seekable", None)
+    try:
+        can_seek = bool(seekable()) if callable(seekable) else False
+    except Exception:
+        can_seek = False
+    if can_seek:
+        try:
+            position = value.tell()
+            value.seek(0, os.SEEK_END)
+            details.append(f"length={value.tell()}")
+            value.seek(position)
+        except Exception:
+            pass
+    name = getattr(value, "name", None)
+    if isinstance(name, str):
+        details.append(f"name={name!r}")
+    return (" " + " ".join(details)) if details else ""
+
+
+def _format_call(args, kwargs):
+    described = {
+        "args": tuple(_describe_payload(arg) for arg in args),
+        "kwargs": {key: _describe_payload(value) for key, value in kwargs.items()},
+    }
+    return _truncate(str(described), _ALLURE_ATTACH_LIMIT)
+
+
+def _format_response(response):
+    if isinstance(response, dict):
+        response = {
+            key: _describe_payload(value) if key == "Body" else value
+            for key, value in response.items()
+        }
+    return _truncate(str(response), _ALLURE_ATTACH_LIMIT)
+
+
 def log_and_call(original_method):
     @wraps(original_method)
     def wrapper(*args, **kwargs):
+        parameters = _format_call(args, kwargs)
         with allure.step(f"Request {original_method.__name__}"):
             response = original_method(*args, **kwargs)
-            allure.attach(str({'args': args, 'kwargs': kwargs}), 
+            allure.attach(parameters,
                           f'{original_method.__name__} executed with parameters',
                           allure.attachment_type.TEXT)
-            allure.attach(str(response), "Response", allure.attachment_type.TEXT)
+            allure.attach(_format_response(response), "Response", allure.attachment_type.TEXT)
         return response
     return wrapper
 
