@@ -25,6 +25,7 @@ import pytest
 import pytz
 import requests
 from botocore.exceptions import ClientError
+from helpers.utility import parse_version
 
 from . import (
     configured_storage_classes,
@@ -2226,23 +2227,37 @@ def test_object_set_get_metadata_none_to_good():
     assert got == "mymeta"
 
 
-def test_object_set_get_metadata_none_to_empty():
-    e = assert_raises(ClientError, _set_get_metadata, metadata="")
-    status, error_code = _get_status_and_error_code(e.response)
-    assert status == 400
-    assert error_code == "InvalidArgument"
+def test_object_set_get_metadata_none_to_empty(neofs_setup):
+    s3_gw_version = parse_version(
+        neofs_setup.get_binary_version(neofs_setup.neofs_s3_gw_path)
+    )
+    if s3_gw_version <= parse_version("0.48.1"):
+        e = assert_raises(ClientError, _set_get_metadata, metadata="")
+        status, error_code = _get_status_and_error_code(e.response)
+        assert status == 400
+        assert error_code == "InvalidArgument"
+    else:
+        got = _set_get_metadata("")
+        assert got == ""
 
 
-def test_object_set_get_metadata_overwrite_to_empty():
+def test_object_set_get_metadata_overwrite_to_empty(neofs_setup):
     bucket_name = get_new_bucket()
     got = _set_get_metadata("oldmeta", bucket_name)
     assert got == "oldmeta"
-    e = assert_raises(
-        ClientError, _set_get_metadata, metadata="", bucket_name=bucket_name
+    s3_gw_version = parse_version(
+        neofs_setup.get_binary_version(neofs_setup.neofs_s3_gw_path)
     )
-    status, error_code = _get_status_and_error_code(e.response)
-    assert status == 400
-    assert error_code == "InvalidArgument"
+    if s3_gw_version <= parse_version("0.48.1"):
+        e = assert_raises(
+            ClientError, _set_get_metadata, metadata="", bucket_name=bucket_name
+        )
+        status, error_code = _get_status_and_error_code(e.response)
+        assert status == 400
+        assert error_code == "InvalidArgument"
+    else:
+        got = _set_get_metadata("", bucket_name)
+        assert got == ""
 
 
 def test_object_set_get_unicode_metadata():
