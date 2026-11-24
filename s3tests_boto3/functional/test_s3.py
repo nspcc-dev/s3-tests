@@ -4125,7 +4125,7 @@ def test_object_raw_get_x_amz_expires_out_positive_range():
     )
 
     res = requests.get(url, verify=get_config_ssl_verify()).__dict__
-    assert res["status_code"] == 403
+    assert res["status_code"] == 400
 
 
 def test_object_anon_put():
@@ -4181,7 +4181,7 @@ def test_object_raw_put_authenticated_expired():
 
     # params wouldn't take a 'Body' parameter so we're passing it in here
     res = requests.put(url, data="foo", verify=get_config_ssl_verify()).__dict__
-    assert res["status_code"] == 403
+    assert res["status_code"] == 400
 
 
 def check_bad_bucket_name(bucket_name):
