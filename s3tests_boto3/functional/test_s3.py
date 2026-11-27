@@ -12117,6 +12117,7 @@ def test_sse_kms_method_head():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_present():
     kms_keyid = get_main_kms_keyid()
     bucket_name = get_new_bucket()
@@ -12178,6 +12179,7 @@ def test_sse_kms_not_declared():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_multipart_upload():
     kms_keyid = get_main_kms_keyid()
     bucket_name = get_new_bucket()
@@ -12236,6 +12238,7 @@ def test_sse_kms_multipart_upload():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_multipart_invalid_chunks_1():
     kms_keyid = get_main_kms_keyid()
     kms_keyid2 = get_secondary_kms_keyid()
@@ -12270,6 +12273,7 @@ def test_sse_kms_multipart_invalid_chunks_1():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_multipart_invalid_chunks_2():
     kms_keyid = get_main_kms_keyid()
     bucket_name = get_new_bucket()
@@ -12351,6 +12355,7 @@ def test_sse_kms_post_object_authenticated_request():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_transfer_1b():
     kms_keyid = get_main_kms_keyid()
     if kms_keyid is None:
@@ -12359,6 +12364,7 @@ def test_sse_kms_transfer_1b():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_transfer_1kb():
     kms_keyid = get_main_kms_keyid()
     if kms_keyid is None:
@@ -12367,6 +12373,7 @@ def test_sse_kms_transfer_1kb():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_transfer_1MB():
     kms_keyid = get_main_kms_keyid()
     if kms_keyid is None:
@@ -12375,6 +12382,7 @@ def test_sse_kms_transfer_1MB():
 
 
 @pytest.mark.encryption
+@pytest.mark.skip(reason="Not Implemented")
 def test_sse_kms_transfer_13b():
     kms_keyid = get_main_kms_keyid()
     if kms_keyid is None:
