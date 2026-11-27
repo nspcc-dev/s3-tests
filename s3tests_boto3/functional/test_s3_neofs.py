@@ -1147,3 +1147,68 @@ def test_object_attributes():
     assert response["ObjectParts"]["PartNumberMarker"] == 3
     assert object_parts[0]["ChecksumSHA256"] == parts[2]["ETag"]
     assert object_parts[0]["PartNumber"] == parts[2]["PartNumber"]
+
+
+SSE_S3_HEADERS = {"x-amz-server-side-encryption": "AES256"}
+SSE_KMS_HEADERS = {
+    "x-amz-server-side-encryption": "aws:kms",
+    "x-amz-server-side-encryption-aws-kms-key-id": "testkey-1",
+}
+
+
+def _test_sse_put_object_not_implemented(sse_headers):
+    bucket_name = get_new_bucket()
+    client = get_client()
+    key = "testobj"
+
+    lf = lambda **kwargs: kwargs["params"]["headers"].update(sse_headers)
+    client.meta.events.register("before-call.s3.PutObject", lf)
+    e = assert_raises(
+        ClientError, client.put_object, Bucket=bucket_name, Key=key, Body="A" * 100
+    )
+    status, error_code = _get_status_and_error_code(e.response)
+    assert status == 501
+    assert error_code == "NotImplemented"
+
+    # The object must not be stored unencrypted.
+    e = assert_raises(ClientError, client.get_object, Bucket=bucket_name, Key=key)
+    status, error_code = _get_status_and_error_code(e.response)
+    assert status == 404
+    assert error_code == "NoSuchKey"
+
+
+def _test_sse_create_multipart_upload_not_implemented(sse_headers):
+    bucket_name = get_new_bucket()
+    client = get_client()
+
+    lf = lambda **kwargs: kwargs["params"]["headers"].update(sse_headers)
+    client.meta.events.register("before-call.s3.CreateMultipartUpload", lf)
+    e = assert_raises(
+        ClientError,
+        client.create_multipart_upload,
+        Bucket=bucket_name,
+        Key="multipart_enc",
+    )
+    status, error_code = _get_status_and_error_code(e.response)
+    assert status == 501
+    assert error_code == "NotImplemented"
+
+
+@pytest.mark.encryption
+def test_sse_s3_put_object_not_implemented():
+    _test_sse_put_object_not_implemented(SSE_S3_HEADERS)
+
+
+@pytest.mark.encryption
+def test_sse_kms_put_object_not_implemented():
+    _test_sse_put_object_not_implemented(SSE_KMS_HEADERS)
+
+
+@pytest.mark.encryption
+def test_sse_s3_create_multipart_upload_not_implemented():
+    _test_sse_create_multipart_upload_not_implemented(SSE_S3_HEADERS)
+
+
+@pytest.mark.encryption
+def test_sse_kms_create_multipart_upload_not_implemented():
+    _test_sse_create_multipart_upload_not_implemented(SSE_KMS_HEADERS)
